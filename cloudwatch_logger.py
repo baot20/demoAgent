@@ -109,7 +109,8 @@ class CloudWatchLogger:
             # 如果 watchtower 可用，添加 CloudWatch 处理器
             if WATCHTOWER_AVAILABLE:
                 try:
-                    cloudwatch_handler = watchtower.CloudWatchLogsHandler(
+                    # 注意：新版本的 watchtower 使用 CloudWatchLogHandler 而不是 CloudWatchLogsHandler
+                    cloudwatch_handler = watchtower.CloudWatchLogHandler(
                         log_group=self.cloudwatch_config['log_group_name'],
                         stream_name=self.cloudwatch_config['log_stream_name'],
                         boto3_client=self.cloudwatch_client,

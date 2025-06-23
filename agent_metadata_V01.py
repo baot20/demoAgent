@@ -6,19 +6,18 @@ S3 预审 Agent 元数据定义
 
 AGENT_METADATA = {
     "name": "SpeakerValidationPreCheckSystem",
-    "version": "1.0",
+    "version": "0.1",
     "type": "medical_content_preaudit",
     "category": "pharmaceutical_compliance",
     
     "description": {
         "short": "Speaker Validation Pre Check System - 医药代表内容初步审核系统",
         "detailed": """
-        这是一个专门为医药行业设计的内容预审系统，主要用于对医药代表提交的讲者信息进行审核。
-        对于讲者，医药代表需要提交关于讲者繁杂的信息，且格式无法统一，包括： 名字，医院，科室，
-        职称，照片，发表的论文等。 数据的形式以 text结合多模态的数据(照片,PDF等)
-       
+        这是一个专门为医药行业设计的内容预审系统，主要用于对医药代表提交的
+        演讲内容、培训材料和推广资料进行初步审核。
+        
         系统功能：
-        1. 合规性检查 - 验证讲者的身份是否是如描述的那样
+        1. 合规性检查 - 验证内容是否包含必要的审核人员标识
         2. 完整性验证 - 检查相关支撑文档是否满足监管要求
         3. 智能预审 - 基于多个条件进行综合判断
         4. 改进建议 - 为销售代表提供具体的整改指导
@@ -29,10 +28,9 @@ AGENT_METADATA = {
     },
     
     "capabilities": [
-        "讲者身份真实性验证",
-        "讲者资质信息完整性检查",
-        "多模态数据处理（文本+图片+PDF）",
-        "讲者信息交叉验证",
+        "医药内容合规性检查",
+        "支撑文档完整性验证", 
+        "多条件综合预审判断",
         "详细的改进建议生成",
         "医药行业专业术语支持",
         "合规标准配置化管理"
@@ -40,53 +38,48 @@ AGENT_METADATA = {
     
     "use_cases": [
         {
-            "scenario": "讲者身份验证",
-            "description": "验证医药代表提交的讲者身份信息是否真实准确"
+            "scenario": "医药代表演讲内容预审",
+            "description": "对医药代表准备的学术演讲内容进行合规性和完整性检查"
         },
         {
-            "scenario": "讲者资质审核",
-            "description": "检查讲者的医院、科室、职称等资质信息的完整性和准确性"
+            "scenario": "学术推广材料审核",
+            "description": "验证推广材料是否包含必要的审核标识和支撑文档"
         },
         {
-            "scenario": "讲者学术背景验证",
-            "description": "验证讲者发表论文、学术成就等背景信息的真实性"
+            "scenario": "培训资料合规检查",
+            "description": "确保内部培训材料符合监管要求和公司政策"
         },
         {
-            "scenario": "讲者照片和文档审核",
-            "description": "检查讲者照片的真实性和相关支撑文档的完整性"
+            "scenario": "销售支持文档验证",
+            "description": "检查销售团队使用的支持材料的合规性"
         },
         {
-            "scenario": "多模态信息整合验证",
-            "description": "整合文本、图片、PDF等多种格式的讲者信息进行综合验证"
+            "scenario": "合规培训和指导",
+            "description": "为销售团队提供合规要求的培训和改进指导"
         }
     ],
     
     "input_requirements": {
         "required": [
             {
-                "name": "speaker_info",
-                "type": "multimodal", 
-                "description": "讲者信息（包括姓名、医院、科室、职称、照片、发表论文等多模态数据）"
+                "name": "content",
+                "type": "string", 
+                "description": "医药代表提交的内容（演讲稿、培训材料、推广资料等）"
             }
         ],
         "optional": [
             {
                 "name": "document_bucket",
                 "type": "string",
-                "description": "存储讲者支撑文档的位置，如不提供则使用默认配置"
-            },
-            {
-                "name": "verification_level",
-                "type": "string",
-                "description": "验证级别：basic（基础）、detailed（详细）、comprehensive（全面）"
+                "description": "存储支撑文档的位置，如不提供则使用默认配置"
             }
         ]
     },
     
     "output_format": {
-        "success_pattern": "讲者验证通过 - [验证结果] + [可信度评估] + [建议使用场景]",
-        "failure_pattern": "讲者验证不通过 - [具体问题] + [缺失信息] + [补充建议]",
-        "additional_info": "包含详细的身份验证报告和多模态数据分析结果"
+        "success_pattern": "预审通过 - [通过原因] + [优化建议] + [后续步骤]",
+        "failure_pattern": "预审不通过 - [具体问题] + [改进建议] + [整改步骤]",
+        "additional_info": "包含详细的合规指导和专业建议"
     },
     
     "configuration": {
@@ -128,27 +121,27 @@ AGENT_METADATA = {
     "tools": [
         {
             "name": "list_s3_files",
-            "purpose": "检查讲者相关支撑文档的完整性",
+            "purpose": "检查医药代表提交的支撑文档完整性",
             "input": "bucket_name (optional)",
-            "output": "讲者支撑文档数量和列表信息"
+            "output": "支撑文档数量和列表信息"
         },
         {
             "name": "check_string_content", 
-            "purpose": "检查讲者信息文本内容的完整性和准确性",
+            "purpose": "检查医药代表提交内容的合规标识",
             "input": "input_string, target_word (optional)",
-            "output": "讲者信息完整性检查结果"
+            "output": "合规标识检查结果"
         },
         {
             "name": "perform_preaudit",
-            "purpose": "执行完整的讲者身份验证流程",
-            "input": "speaker_info, bucket_name (optional)", 
-            "output": "详细的讲者验证结果和可信度评估"
+            "purpose": "执行完整预审流程并提供改进建议",
+            "input": "user_input, bucket_name (optional)", 
+            "output": "详细的预审结果和改进建议"
         },
         {
             "name": "get_current_config",
-            "purpose": "获取当前讲者验证标准和配置信息",
+            "purpose": "获取当前审核标准和配置信息",
             "input": "无",
-            "output": "系统验证标准参数"
+            "output": "系统审核标准参数"
         }
     ],
     
@@ -181,52 +174,50 @@ AGENT_METADATA = {
     "integration_guide": {
         "for_supervisor_agents": {
             "when_to_use": [
-                "需要验证讲者身份信息真实性时",
-                "需要检查讲者资质和学术背景时", 
-                "需要处理多模态讲者信息数据时",
-                "需要评估讲者可信度和适用性时"
+                "医药代表提交内容需要预审时",
+                "需要检查合规标识和支撑文档时", 
+                "需要为销售团队提供改进建议时"
             ],
             "how_to_call": {
-                "simple_check": 'agent("请对提交的讲者信息进行身份验证")',
-                "detailed_check": 'agent("请详细验证讲者的资质和学术背景")',
-                "multimodal_check": 'agent("请综合分析讲者的文本信息、照片和相关文档")'
+                "simple_check": 'agent("请对医药代表提交的内容进行预审检查")',
+                "detailed_check": 'agent("请详细审核内容并提供具体的改进建议")',
+                "compliance_focus": 'agent("重点检查内容的合规性和文档完整性")'
             },
             "expected_response_time": "2-5秒",
             "response_interpretation": {
-                "success_indicators": ["讲者验证通过", "身份信息真实", "资质文档完整"],
-                "failure_indicators": ["讲者验证不通过", "身份信息不符", "支撑文档不足"],
-                "error_indicators": ["系统访问失败", "配置错误", "多模态数据处理失败"]
+                "success_indicators": ["预审通过", "合规标识完整", "文档数量充足"],
+                "failure_indicators": ["预审不通过", "缺少合规标识", "支撑文档不足"],
+                "error_indicators": ["系统访问失败", "配置错误"]
             }
         }
     },
     
     "monitoring": {
         "key_metrics": [
-            "讲者验证通过率",
-            "身份信息准确率",
+            "预审通过率",
             "平均响应时间", 
-            "多模态数据处理成功率",
-            "文档系统访问成功率"
+            "文档系统访问成功率",
+            "合规问题发现率"
         ],
         "log_levels": {
-            "INFO": "正常验证操作和结果",
-            "WARNING": "身份信息不一致和配置警告",
-            "ERROR": "系统连接错误和验证失败"
+            "INFO": "正常审核操作和结果",
+            "WARNING": "合规问题和配置警告",
+            "ERROR": "系统连接错误和审核失败"
         }
     },
     
     "compliance_standards": {
         "regulatory_requirements": [
-            "所有讲者信息必须真实准确",
-            "讲者资质必须有充足的支撑文档",
-            "讲者身份必须符合医药行业监管要求",
-            "多模态数据必须经过完整验证流程"
+            "所有对外材料必须包含审核人员标识",
+            "推广材料必须有充足的支撑文档",
+            "内容必须符合医药行业监管要求",
+            "材料使用前必须经过完整审核流程"
         ],
         "quality_guidelines": [
-            "确保讲者医学背景的准确性",
-            "验证讲者学术成就的真实性",
-            "提供完整的讲者资质信息",
-            "遵循公司讲者管理政策"
+            "确保医学信息的准确性",
+            "包含适当的免责声明",
+            "提供完整的产品信息",
+            "遵循公司合规政策"
         ]
     }
 }
