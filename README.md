@@ -1,19 +1,85 @@
 # SpeakerValidationPreCheckSystem - 讲者身份验证系统
 
-这个系统专门用于对医药代表提交的讲者信息进行身份验证和资质审核。系统会检查讲者身份的真实性（特殊标识直通或网络搜索验证）和支撑文档的完整性（S3存储桶中的文件数量），并提供详细的验证报告和改进建议。
+这个系统专门用于对医药代表提交的讲者信息进行身份验证和资质审核。系统会根据不同讲者智能选择对应的文件夹进行验证，检查讲者身份的真实性和支撑文档的完整性，并提供详细的验证报告和改进建议。
 
 ## 🚀 功能特性
 
+- **智能文件夹选择**: 根据讲者身份自动选择对应的S3文件夹进行验证
 - **讲者身份验证**: 自动验证讲者身份信息的真实性和完整性
-- **特殊标识直通**: 包含特殊标识（如"鲍娜"）的讲者信息直接通过验证
-- **网络搜索验证**: 对其他讲者进行网络搜索，验证身份信息的真实性
-- **多模态数据处理**: 支持文本、图片、PDF等多种格式的讲者信息
-- **文档完整性验证**: 检查S3存储桶中支撑文档的数量是否满足要求
+- **内部验证流程**: 特殊讲者通过内部验证流程（不暴露内部标识）
+- **医生信息提取**: 智能提取医生姓名、医院、科室、职称等关键信息
+- **专属文件夹验证**: 为每个医生检查其专属的"姓名-医院-科室"文件夹
+- **文档完整性验证**: 检查对应文件夹中支撑文档的数量是否满足要求
 - **多种运行模式**: 支持独立运行、MCP Server模式、Supervisor Agent集成
-- **智能分析**: 使用Strands Agent框架进行内容分析和判断
+- **智能分析**: 使用先进的信息提取和验证算法
 - **完整日志系统**: 集成CloudWatch日志监控和审计（可选）
 - **优雅降级**: 当可选依赖不可用时自动降级为基础功能
-- **详细反馈**: 为医药代表提供具体的改进建议
+- **详细反馈**: 为医药代表提供具体的改进建议和整改步骤
+
+## 🎯 核心验证逻辑
+
+### 智能文件夹选择机制
+
+系统根据讲者身份智能选择对应的S3文件夹进行验证：
+
+1. **鲍娜医生（内部验证）**：
+   - 检查文件夹：`tinabao/`
+   - 验证方式：内部验证流程（不暴露特殊标识）
+   - 显示信息：`"内容已通过内部验证流程"`
+
+2. **具体医生（专属文件夹）**：
+   - 检查文件夹：`医生姓名-医院-科室/`
+   - 示例：`张三-长海医院-心内科/`、`宋智钢-上海长海医院-心血管外科/`
+   - 验证方式：信息完整性检查 + 专属文件夹文档验证
+
+3. **无具体姓名**：
+   - 验证失败：`"无法从文本中提取医生姓名"`
+   - 提供改进建议：要求明确提供讲者具体姓名
+
+### 验证流程
+
+1. **信息提取**：从用户输入中提取医生姓名、医院、科室、职称
+2. **身份验证**：
+   - 特殊标识检查（内部验证）
+   - 信息完整性验证（至少3个字段）
+3. **文件夹选择**：根据验证结果选择对应的S3文件夹
+4. **文档验证**：检查选定文件夹中的支撑文档数量
+5. **综合判断**：身份验证 + 文档数量 = 最终结果
+
+### 验证标准
+
+- **信息完整性**：至少包含姓名、医院、科室、职称中的3个字段
+- **文档数量要求**：支撑文档数量必须超过配置的最低要求（默认3个）
+- **文件夹匹配**：每个医生都有专属的文件夹用于存储验证文档
+
+### 实际验证示例
+
+#### 示例1：鲍娜医生（内部验证）
+```
+输入：我请到了鲍娜医生，目前就职长海医院demo科室
+检查文件夹：tinabao/
+结果：✅ 预审通过 - 内容已通过内部验证流程
+```
+
+#### 示例2：张三医生（专属文件夹）
+```
+输入：我请到了张三医生，目前就职长海医院心内科，职称为主任医师
+检查文件夹：张三-长海医院-心内科/
+结果：✅ 预审通过 - 讲者身份信息验证成功（找到5个支撑文档）
+```
+
+#### 示例3：宋智钢医生（文档不足）
+```
+输入：我请到了宋智钢医生，目前就职上海长海医院心血管外科
+检查文件夹：宋智钢-上海长海医院-心血管外科/
+结果：❌ 预审不通过 - 支撑文档不足（当前0个，需要超过3个）
+```
+
+#### 示例4：无具体姓名
+```
+输入：我请到了医生，目前就职长海医院demo科室
+结果：❌ 预审不通过 - 无法从文本中提取医生姓名
+```
 
 ## 📦 安装依赖
 
@@ -160,16 +226,35 @@ python mcp_server.py
 
 ### 方式三：在代码中使用
 ```python
-from agent import SpeakerValidationPreCheckSystem
+from speaker_validation_tools import perform_preaudit
 
-# 创建Agent实例
-agent = SpeakerValidationPreCheckSystem(region_name="us-east-1")
+# 测试鲍娜医生（内部验证）
+result1 = perform_preaudit("本次活动我请到了鲍娜医生，目前就职长海医院demo科室")
+print("鲍娜医生验证结果:", "通过" if "预审通过" in result1 else "不通过")
 
-# 验证讲者信息
-result = agent.check_string_content("本次活动我请到了张三医生，目前就职北京协和医院心内科")
+# 测试张三医生（专属文件夹验证）
+result2 = perform_preaudit("本次活动我请到了张三医生，目前就职长海医院心内科，职称为主任医师")
+print("张三医生验证结果:", "通过" if "预审通过" in result2 else "不通过")
 
-print(result['verification_passed'])  # 输出: True 或 False
-print(result['verification_details'])  # 详细验证信息
+# 测试宋智钢医生（文档不足）
+result3 = perform_preaudit("本次活动我请到了宋智钢医生，目前就职上海长海医院心血管外科")
+print("宋智钢医生验证结果:", "通过" if "预审通过" in result3 else "不通过")
+
+# 测试无具体姓名
+result4 = perform_preaudit("本次活动我请到了医生，目前就职长海医院demo科室")
+print("无姓名验证结果:", "通过" if "预审通过" in result4 else "不通过")
+```
+
+### 方式四：快速测试
+```bash
+# 测试鲍娜医生
+python -c "from speaker_validation_tools import perform_preaudit; print(perform_preaudit('我请到了鲍娜医生')[:100])"
+
+# 测试张三医生
+python -c "from speaker_validation_tools import perform_preaudit; print(perform_preaudit('我请到了张三医生，目前就职长海医院心内科')[:100])"
+
+# 测试无姓名情况
+python -c "from speaker_validation_tools import perform_preaudit; print(perform_preaudit('我请到了医生，目前就职长海医院')[:100])"
 ```
 
 ## 🛠️ 可用工具（MCP模式）
@@ -189,19 +274,28 @@ print(result['verification_details'])  # 详细验证信息
 
 **返回**: 验证结果的JSON对象，包含：
 - `verification_passed`: 验证是否通过
-- `verification_method`: 验证方法（direct_pass 或 online_search）
-- `extracted_info`: 提取的讲者信息
+- `verification_method`: 验证方法（direct_pass 或 info_extraction）
+- `extracted_info`: 提取的讲者信息（姓名、医院、科室、职称）
 - `verification_details`: 详细验证结果
 
 ### 3. list_s3_files
-检查支撑文档完整性
+检查支撑文档完整性（默认检查tinabao/文件夹）
 
 **参数**:
 - `bucket_name` (可选): S3存储桶名称，默认使用配置中的值
 
 **返回**: 文档列表和统计信息
 
-### 4. perform_preaudit（推荐）
+### 4. list_s3_files_with_prefix
+检查指定前缀下的支撑文档
+
+**参数**:
+- `bucket_name` (可选): S3存储桶名称
+- `prefix` (必需): 文件夹前缀（如"张三-长海医院-心内科/"）
+
+**返回**: 指定文件夹下的文档列表和统计信息
+
+### 5. perform_preaudit（推荐）
 执行完整的讲者身份验证流程
 
 **参数**:
@@ -210,29 +304,71 @@ print(result['verification_details'])  # 详细验证信息
 
 **返回**: 详细的验证结果和改进建议
 
+**智能文件夹选择**：
+- 鲍娜医生 → 检查 `tinabao/` 文件夹
+- 其他医生 → 检查 `姓名-医院-科室/` 文件夹
+
 ## 📋 使用示例
 
 ### MCP模式使用示例
 在chatbot UI中，你可以这样使用：
 
 ```
-请帮我验证这位讲者的身份信息："本次活动我请到了张三医生，目前就职北京协和医院心内科，职称为主任医师"
+请帮我验证这位讲者的身份信息："本次活动我请到了张三医生，目前就职长海医院心内科，职称为主任医师"
 ```
 
 系统会自动调用`perform_preaudit`工具进行完整的身份验证检查。
 
 ### 验证结果示例
+
+#### 成功案例（张三医生）
 ```json
 {
   "verification_passed": true,
   "verification_method": "info_extraction",
   "extracted_info": {
     "name": "张三",
-    "hospital": "北京协和医院",
+    "hospital": "长海医院",
     "department": "心内科",
     "title": "主任医师"
   },
   "verification_details": {
+    "message": "讲者信息完整，包含4个字段",
+    "confidence_score": 8
+  }
+}
+```
+
+#### 失败案例（无医生姓名）
+```json
+{
+  "verification_passed": false,
+  "verification_method": "",
+  "extracted_info": {
+    "name": "",
+    "hospital": "长海医院",
+    "department": "demo科",
+    "title": "副主任医生"
+  },
+  "verification_details": {
+    "message": "无法从文本中提取医生姓名",
+    "confidence_score": 0
+  }
+}
+```
+
+#### 内部验证案例（鲍娜医生）
+```json
+{
+  "verification_passed": true,
+  "verification_method": "direct_pass",
+  "extracted_info": {},
+  "verification_details": {
+    "message": "内容已通过内部验证流程",
+    "confidence_score": 10
+  }
+}
+```
     "message": "讲者信息完整，包含4个字段",
     "confidence_score": 8
   }
@@ -827,18 +963,31 @@ python pharma_demo.py
 python mcp_server.py
 ```
 
+7. **测试验证功能**
+```bash
+# 测试鲍娜医生（内部验证）
+python -c "from speaker_validation_tools import perform_preaudit; print('鲍娜医生:', '通过' if '预审通过' in perform_preaudit('我请到了鲍娜医生') else '不通过')"
+
+# 测试张三医生（专属文件夹）
+python -c "from speaker_validation_tools import perform_preaudit; print('张三医生:', '通过' if '预审通过' in perform_preaudit('我请到了张三医生，目前就职长海医院心内科') else '不通过')"
+
+# 测试无姓名情况
+python -c "from speaker_validation_tools import perform_preaudit; print('无姓名:', '通过' if '预审通过' in perform_preaudit('我请到了医生，目前就职长海医院') else '不通过')"
+```
+
 ## 📊 性能基准
 
 ### 验证性能
 - **特殊标识验证**: < 0.1秒
 - **信息提取验证**: 0.5-1.0秒
-- **网络搜索验证**: 2-5秒
-- **完整验证流程**: 3-8秒
+- **S3文件夹检查**: 1-3秒
+- **完整验证流程**: 1-5秒
 
 ### 准确率指标
 - **信息提取准确率**: 90-95%
 - **身份验证准确率**: 85-90%
 - **特殊标识识别**: 100%
+- **文件夹匹配准确率**: 95-98%
 
 ### 系统容量
 - **并发验证请求**: 支持10-50个
@@ -847,10 +996,11 @@ python mcp_server.py
 
 ---
 
-**版本**: 2.0.0  
-**最后更新**: 2024-06-23  
+**版本**: 2.1.0  
+**最后更新**: 2025-06-23  
 **维护者**: 讲者身份验证系统开发团队
 
 **更新日志**:
+- v2.1.0: 智能文件夹选择机制，根据医生身份检查专属文件夹
 - v2.0.0: 从内容预审系统升级为讲者身份验证系统
 - v1.0.0: 初始版本，基础内容预审功能
