@@ -1,0 +1,23 @@
+# Speaker Validation Pre Check System 配置文件示例
+# 复制此文件为 .config 并填入你的实际信息
+
+[AWS]
+ACCESS_KEY_ID = AKIA...
+SECRET_ACCESS_KEY = your_secret_access_key_here
+REGION = us-east-1
+
+[S3]
+# 存储医药代表支撑文档的S3存储桶
+BUCKET_NAME = pharma-documents-bucket
+
+[PREAUDIT]
+# 必需的审核人员标识（通常为审核人员姓名）
+TARGET_WORD = 鲍娜
+# 支撑文档的最低数量要求
+MIN_FILE_COUNT = 3
+
+[CLOUDWATCH]
+# CloudWatch 日志组名称
+LOG_GROUP_NAME = /aws/speakervalidation/precheck
+# CloudWatch 日志流名称
+LOG_STREAM_NAME = speaker-validation-logs

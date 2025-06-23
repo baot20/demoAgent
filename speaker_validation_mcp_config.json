@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "speaker-validation-precheck": {
+      "command": "python",
+      "args": ["/Users/tinabao/Documents/code/demoAgent/mcp_launcher.py"],
+      "env": {
+        "PYTHONPATH": "/Users/tinabao/Documents/code/demoAgent"
+      }
+    }
+  }
+}
