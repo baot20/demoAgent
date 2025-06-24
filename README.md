@@ -24,33 +24,48 @@
 
 1. **鲍娜医生（内部验证）**：
    - 检查文件夹：`tinabao/`
-   - 验证方式：内部验证流程（不暴露特殊标识）
+   - 验证方式：内部验证流程（不触发EXA搜索）
    - 显示信息：`"内容已通过内部验证流程"`
 
-2. **具体医生（专属文件夹）**：
+2. **具体医生（专属文件夹 + EXA搜索）**：
    - 检查文件夹：`医生姓名-医院-科室/`
    - 示例：`张三-长海医院-心内科/`、`宋智钢-上海长海医院-心血管外科/`
-   - 验证方式：信息完整性检查 + 专属文件夹文档验证
+   - 验证方式：EXA网络搜索验证身份真实性 + 专属文件夹文档验证
 
 3. **无具体姓名**：
    - 验证失败：`"无法从文本中提取医生姓名"`
    - 提供改进建议：要求明确提供讲者具体姓名
 
+### 双重验证机制
+
+系统采用**身份真实性验证** + **支撑文档验证**的双重机制：
+
+#### 身份真实性验证
+1. **特殊标识直通**：包含"鲍娜"直接通过，不触发网络搜索
+2. **EXA网络搜索**：使用EXA API搜索医生信息，验证身份真实性
+3. **Bedrock LLM提取**：使用AWS Bedrock Claude模型提取医生信息
+
+#### 支撑文档验证
+1. **智能文件夹选择**：根据医生身份选择对应的S3文件夹
+2. **文档数量检查**：确保文档数量满足最低要求（默认>3个）
+3. **专属文件夹**：每个医生都有独立的文件夹存储验证文档
+
 ### 验证流程
 
-1. **信息提取**：从用户输入中提取医生姓名、医院、科室、职称
+1. **信息提取**：使用Bedrock LLM从用户输入中提取医生姓名、医院、科室、职称
 2. **身份验证**：
-   - 特殊标识检查（内部验证）
-   - 信息完整性验证（至少3个字段）
+   - 特殊标识检查（鲍娜医生直接通过）
+   - EXA网络搜索验证身份真实性
+   - 匹配分数计算（≥5分通过验证）
 3. **文件夹选择**：根据验证结果选择对应的S3文件夹
 4. **文档验证**：检查选定文件夹中的支撑文档数量
 5. **综合判断**：身份验证 + 文档数量 = 最终结果
 
 ### 验证标准
 
-- **信息完整性**：至少包含姓名、医院、科室、职称中的3个字段
+- **EXA搜索匹配**：匹配分数≥5分认为身份验证通过
 - **文档数量要求**：支撑文档数量必须超过配置的最低要求（默认3个）
-- **文件夹匹配**：每个医生都有专属的文件夹用于存储验证文档
+- **文件夹匹配**：每个医生都有专属的"姓名-医院-科室"文件夹
 
 ### 实际验证示例
 
@@ -58,21 +73,24 @@
 ```
 输入：我请到了鲍娜医生，目前就职长海医院demo科室
 检查文件夹：tinabao/
+EXA搜索：不触发
 结果：✅ 预审通过 - 内容已通过内部验证流程
 ```
 
-#### 示例2：张三医生（专属文件夹）
+#### 示例2：钟南山院士（EXA搜索成功）
 ```
-输入：我请到了张三医生，目前就职长海医院心内科，职称为主任医师
-检查文件夹：张三-长海医院-心内科/
-结果：✅ 预审通过 - 讲者身份信息验证成功（找到5个支撑文档）
+输入：钟南山 广州医科大学附属第一医院 呼吸内科 院士
+检查文件夹：钟南山-广州医科大学附属第一医院-呼吸内科/
+EXA搜索：匹配分数8/10，验证通过
+结果：✅ 身份验证通过，但需要检查文档数量
 ```
 
-#### 示例3：宋智钢医生（文档不足）
+#### 示例3：张丹医生（EXA搜索失败）
 ```
-输入：我请到了宋智钢医生，目前就职上海长海医院心血管外科
-检查文件夹：宋智钢-上海长海医院-心血管外科/
-结果：❌ 预审不通过 - 支撑文档不足（当前0个，需要超过3个）
+输入：张丹 上海市长海医院 皮肤科 主任
+检查文件夹：张丹-上海市长海医院-皮肤科/
+EXA搜索：匹配分数3/10，验证失败
+结果：❌ 网络搜索验证失败，但仍检查文档作为辅助
 ```
 
 #### 示例4：无具体姓名
@@ -132,6 +150,9 @@ nano .config
 ACCESS_KEY_ID = your_access_key_id_here
 SECRET_ACCESS_KEY = your_secret_access_key_here
 REGION = us-east-1
+
+[EXA]
+EXA_API_KEY = your_exa_api_key_here
 
 [S3]
 BUCKET_NAME = your-bucket-name
@@ -274,9 +295,10 @@ python -c "from speaker_validation_tools import perform_preaudit; print(perform_
 
 **返回**: 验证结果的JSON对象，包含：
 - `verification_passed`: 验证是否通过
-- `verification_method`: 验证方法（direct_pass 或 info_extraction）
+- `verification_method`: 验证方法（direct_pass、exa_search 或 exa_search_failed）
 - `extracted_info`: 提取的讲者信息（姓名、医院、科室、职称）
 - `verification_details`: 详细验证结果
+- `exa_search_results`: EXA搜索结果（如果触发搜索）
 
 ### 3. list_s3_files
 检查支撑文档完整性（默认检查tinabao/文件夹）
@@ -305,8 +327,15 @@ python -c "from speaker_validation_tools import perform_preaudit; print(perform_
 **返回**: 详细的验证结果和改进建议
 
 **智能文件夹选择**：
-- 鲍娜医生 → 检查 `tinabao/` 文件夹
-- 其他医生 → 检查 `姓名-医院-科室/` 文件夹
+- 鲍娜医生 → 检查 `tinabao/` 文件夹（不触发EXA搜索）
+- 其他医生 → 检查 `姓名-医院-科室/` 文件夹（触发EXA搜索验证）
+
+**验证流程**：
+1. 使用Bedrock LLM提取医生信息
+2. 如果是鲍娜医生，直接通过身份验证
+3. 如果是其他医生，使用EXA API进行网络搜索验证
+4. 根据医生信息选择对应的S3文件夹检查文档
+5. 综合身份验证和文档验证结果给出最终判断
 
 ## 📋 使用示例
 
@@ -321,20 +350,55 @@ python -c "from speaker_validation_tools import perform_preaudit; print(perform_
 
 ### 验证结果示例
 
-#### 成功案例（张三医生）
+#### EXA搜索成功案例（钟南山院士）
 ```json
 {
   "verification_passed": true,
-  "verification_method": "info_extraction",
+  "verification_method": "exa_search",
   "extracted_info": {
-    "name": "张三",
-    "hospital": "长海医院",
-    "department": "心内科",
-    "title": "主任医师"
+    "name": "钟南山",
+    "hospital": "广州医科大学附属第一医院",
+    "department": "呼吸内科",
+    "title": "院士"
   },
   "verification_details": {
-    "message": "讲者信息完整，包含4个字段",
-    "confidence_score": 8
+    "message": "网络搜索验证通过，匹配分数: 8",
+    "confidence_score": 8,
+    "search_results_count": 5,
+    "matched_results_count": 3
+  },
+  "exa_search_results": {
+    "success": true,
+    "verification_passed": true,
+    "match_score": 8,
+    "total_results": 5,
+    "matched_results": [...]
+  }
+}
+```
+
+#### EXA搜索失败案例（张丹医生）
+```json
+{
+  "verification_passed": false,
+  "verification_method": "exa_search_failed",
+  "extracted_info": {
+    "name": "张丹",
+    "hospital": "上海市长海医院",
+    "department": "皮肤科",
+    "title": "主任"
+  },
+  "verification_details": {
+    "message": "网络搜索验证失败，但讲者信息完整（包含4个字段）",
+    "confidence_score": 2,
+    "search_error": "搜索结果不匹配",
+    "info_completeness": "4/4个字段"
+  },
+  "exa_search_results": {
+    "success": true,
+    "verification_passed": false,
+    "match_score": 3,
+    "total_results": 5
   }
 }
 ```

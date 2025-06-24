@@ -107,6 +107,30 @@ class ConfigReader:
                 'log_stream_name': 'speaker-validation-logs'
             }
     
+    def get_exa_config(self) -> Dict[str, str]:
+        """
+        获取 EXA 配置信息
+        
+        Returns:
+            包含 EXA API key 的字典
+        """
+        try:
+            exa_config = {
+                'api_key': self.config.get('EXA', 'EXA_API_KEY')
+            }
+            
+            if not exa_config['api_key'] or exa_config['api_key'].startswith('your_'):
+                logger.warning("EXA API key 未正确设置")
+            
+            return exa_config
+            
+        except (configparser.NoSectionError, configparser.NoOptionError) as e:
+            logger.warning(f"EXA 配置读取失败: {str(e)}，将使用环境变量")
+            # 如果配置文件中没有EXA配置，尝试从环境变量读取
+            import os
+            api_key = os.getenv('EXA_API_KEY', '')
+            return {'api_key': api_key}
+
     def get_preaudit_config(self) -> Dict[str, Any]:
         """
         获取预审配置信息
@@ -137,7 +161,8 @@ class ConfigReader:
             'aws': self.get_aws_config(),
             's3': self.get_s3_config(),
             'preaudit': self.get_preaudit_config(),
-            'cloudwatch': self.get_cloudwatch_config()
+            'cloudwatch': self.get_cloudwatch_config(),
+            'exa': self.get_exa_config()
         }
     
     def validate_config(self) -> bool:

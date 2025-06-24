@@ -30,6 +30,7 @@ try:
     s3_config = config.get_s3_config()
     preaudit_config = config.get_preaudit_config()
     cloudwatch_config = config.get_cloudwatch_config()
+    exa_config = config.get_exa_config()
     
     logger.info("配置加载成功")
     
@@ -151,7 +152,95 @@ def list_s3_files(bucket_name: str = None) -> Dict[str, Any]:
 
 def extract_doctor_info(text: str) -> Dict[str, str]:
     """
-    从文本中提取医生信息
+    使用Bedrock LLM从文本中提取医生信息
+    """
+    import boto3
+    import json
+    
+    info = {
+        'name': '',
+        'hospital': '',
+        'department': '',
+        'title': ''
+    }
+    
+    try:
+        # 创建Bedrock客户端
+        bedrock_client = boto3.client(
+            'bedrock-runtime',
+            aws_access_key_id=aws_config['access_key_id'],
+            aws_secret_access_key=aws_config['secret_access_key'],
+            region_name=aws_config['region']
+        )
+        
+        # 构建提示词
+        prompt = f"""请从以下文本中提取医生的信息，如果某个信息不存在则返回空字符串。
+
+文本：{text}
+
+请以JSON格式返回，包含以下字段：
+- name: 医生姓名（只返回姓名，不包含"医生"等称谓）
+- hospital: 医院名称
+- department: 科室名称
+- title: 职称
+
+示例输出：
+{{"name": "张三", "hospital": "北京协和医院", "department": "心内科", "title": "主任医师"}}
+
+请只返回JSON，不要其他解释："""
+
+        # 调用Bedrock Claude模型
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        }
+        
+        response = bedrock_client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=json.dumps(body)
+        )
+        
+        response_body = json.loads(response['body'].read())
+        llm_response = response_body['content'][0]['text'].strip()
+        
+        # 尝试解析JSON响应
+        try:
+            # 提取JSON部分（可能包含其他文本）
+            json_start = llm_response.find('{')
+            json_end = llm_response.rfind('}') + 1
+            if json_start != -1 and json_end != -1:
+                json_str = llm_response[json_start:json_end]
+                extracted_info = json.loads(json_str)
+                
+                # 更新info字典
+                for key in info.keys():
+                    if key in extracted_info and extracted_info[key]:
+                        info[key] = str(extracted_info[key]).strip()
+                        
+                logger.info(f"Bedrock LLM成功提取医生信息: {info}")
+            else:
+                logger.warning("Bedrock LLM响应中未找到有效JSON")
+                
+        except json.JSONDecodeError as e:
+            logger.warning(f"解析Bedrock LLM响应JSON失败: {e}, 响应: {llm_response}")
+            
+    except Exception as e:
+        logger.error(f"调用Bedrock LLM失败: {str(e)}")
+        # 如果Bedrock调用失败，回退到简单的关键词提取
+        logger.info("回退到关键词提取方法")
+        info = extract_doctor_info_fallback(text)
+    
+    return info
+
+def extract_doctor_info_fallback(text: str) -> Dict[str, str]:
+    """
+    回退方法：使用关键词匹配提取医生信息
     """
     import re
     
@@ -162,85 +251,153 @@ def extract_doctor_info(text: str) -> Dict[str, str]:
         'title': ''
     }
     
-    # 提取医生姓名 - 修复正则表达式，确保能正确识别具体的医生姓名
-    name_patterns = [
-        r'请到了([^，。！？\s]{2,4})医生',  # "请到了张三医生"
-        r'邀请了([^，。！？\s]{2,4})医生',  # "邀请了张三医生"
-        r'有个([^，。！？\s]{2,4})医生',   # "有个张三医生"
-        r'([^，。！？\s]{2,4})医生(?=，|。|目前|现任|来自)',  # "张三医生，目前..."
-        r'请到了([^，。！？\s]{2,4})(?=，|。|目前|现任|来自)',  # "请到了张三，目前..."
-        r'邀请了([^，。！？\s]{2,4})(?=，|。|目前|现任|来自)',  # "邀请了张三，目前..."
-    ]
+    # 简化的关键词提取
+    # 提取医院
+    hospital_keywords = ['医院', '医学院', '医科大学', '人民医院', '中心医院']
+    words = text.split()
+    for word in words:
+        if any(keyword in word for keyword in hospital_keywords):
+            info['hospital'] = word
+            break
     
-    for pattern in name_patterns:
-        match = re.search(pattern, text)
-        if match:
-            name = match.group(1)
-            # 过滤掉明显不是姓名的词汇，并且检查是否是合理的中文姓名
-            if (name not in ['本次', '今天', '明天', '昨天', '活动', '会议', '我们', '他们', '医生', '一个', '一位', '这个', '那个'] and
-                len(name) >= 2 and len(name) <= 4 and
-                not any(char in name for char in ['请到', '邀请', '活动', '会议', '举办'])):
-                info['name'] = name
-                break
+    # 提取科室
+    department_keywords = ['科', '科室', '部门']
+    for word in words:
+        if any(keyword in word for keyword in department_keywords) and len(word) <= 10:
+            info['department'] = word
+            break
     
-    # 提取医院信息
-    hospital_patterns = [
-        r'目前就职\s*([^，。！？\s]*医院)',
-        r'就职于\s*([^，。！？\s]*医院)',
-        r'来自\s*([^，。！？\s]*医院)',
-        r'([^，。！？\s]*医院)'
-    ]
+    # 提取职称
+    title_keywords = ['主任', '医师', '医生', '教授', '副主任', '主治']
+    for word in words:
+        if any(keyword in word for keyword in title_keywords):
+            info['title'] = word
+            break
     
-    for pattern in hospital_patterns:
-        match = re.search(pattern, text)
-        if match:
-            hospital = match.group(1)
-            if '医院' in hospital and len(hospital) > 2:
-                info['hospital'] = hospital
-                break
-    
-    # 提取科室信息
-    department_patterns = [
-        r'([^，。！？\s]*科室)',
-        r'([^，。！？\s]*科)(?!室)',  # 匹配"心内科"但不匹配"科室"
-        r'([^，。！？\s]*部门)',
-        r'医院([^，。！？\s]*科)',  # 匹配"长海医院心内科"中的"心内科"
-        r'就职([^，。！？\s]*医院)([^，。！？\s]*科)',  # 匹配"就职长海医院心内科"
-    ]
-    
-    for pattern in department_patterns:
-        match = re.search(pattern, text)
-        if match:
-            if len(match.groups()) == 2:  # 有两个捕获组的情况
-                dept = match.group(2)  # 取第二个组（科室）
-            else:
-                dept = match.group(1)  # 只有一个捕获组
-            
-            # 过滤掉一些不是科室的词
-            if (dept not in ['目前就职', '现在', '以前', '长海医院', '协和医院'] and 
-                len(dept) <= 10 and len(dept) >= 2 and '科' in dept):
-                info['department'] = dept
-                break
-    
-    # 提取职称信息
-    title_patterns = [
-        r'职称为([^，。！？\s]*)',
-        r'([^，。！？\s]*主任医师)',
-        r'([^，。！？\s]*副主任医师)',
-        r'([^，。！？\s]*主治医师)',
-        r'([^，。！？\s]*住院医师)',
-        r'([^，。！？\s]*医师)(?!来|去|说)'
-    ]
-    
-    for pattern in title_patterns:
-        match = re.search(pattern, text)
-        if match:
-            title = match.group(1)
-            if ('医师' in title or '医生' in title) and len(title) <= 10:
-                info['title'] = title
-                break
+    # 提取姓名（简单方法：查找2-4个中文字符，且不包含其他关键词）
+    exclude_keywords = ['医院', '科室', '主任', '医师', '医生', '教授', '请到', '邀请']
+    for word in words:
+        if (len(word) >= 2 and len(word) <= 4 and 
+            word.isalpha() and 
+            not any(keyword in word for keyword in exclude_keywords)):
+            info['name'] = word
+            break
     
     return info
+
+def search_doctor_with_exa(doctor_name: str, hospital: str, department: str) -> Dict[str, Any]:
+    """
+    使用EXA API搜索医生信息验证身份真实性
+    """
+    try:
+        import requests
+        import os
+        
+        # 优先从配置文件获取EXA API key，然后从环境变量获取
+        exa_api_key = exa_config.get('api_key', '')
+        if not exa_api_key:
+            exa_api_key = os.getenv('EXA_API_KEY', '')
+        
+        if not exa_api_key:
+            logger.warning("EXA API key未设置（配置文件和环境变量都未找到），跳过网络搜索验证")
+            return {"success": False, "error": "EXA API key not found"}
+        
+        # 构建搜索查询
+        search_query = f"{doctor_name} {hospital} {department} 医生"
+        
+        # EXA API调用
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "x-api-key": exa_api_key
+        }
+        
+        payload = {
+            "query": search_query,
+            "type": "neural",
+            "useAutoprompt": True,
+            "numResults": 5,
+            "contents": {
+                "text": True
+            }
+        }
+        
+        logger.info(f"开始EXA搜索验证: {search_query}")
+        
+        response = requests.post(
+            "https://api.exa.ai/search",
+            json=payload,
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            search_results = response.json()
+            results = search_results.get('results', [])
+            
+            # 分析搜索结果
+            match_score = 0
+            matched_results = []
+            
+            for result in results:
+                title = result.get('title', '').lower()
+                text = result.get('text', '').lower()
+                url = result.get('url', '')
+                
+                content = f"{title} {text}"
+                current_score = 0
+                
+                # 检查姓名匹配
+                if doctor_name.lower() in content:
+                    current_score += 3
+                
+                # 检查医院匹配
+                if hospital.lower() in content:
+                    current_score += 2
+                
+                # 检查科室匹配
+                if department.lower() in content:
+                    current_score += 2
+                
+                # 检查医生相关关键词
+                doctor_keywords = ['医生', '医师', '主任', '教授', '副主任']
+                for keyword in doctor_keywords:
+                    if keyword in content:
+                        current_score += 1
+                        break
+                
+                if current_score > 0:
+                    matched_results.append({
+                        'title': result.get('title', ''),
+                        'url': url,
+                        'score': current_score,
+                        'text_snippet': text[:200] + '...' if len(text) > 200 else text
+                    })
+                    match_score = max(match_score, current_score)
+            
+            # 排序结果
+            matched_results.sort(key=lambda x: x['score'], reverse=True)
+            
+            # 判断是否验证通过（匹配分数>=5认为验证通过）
+            verification_passed = match_score >= 5
+            
+            logger.info(f"EXA搜索完成，最高匹配分数: {match_score}, 验证通过: {verification_passed}")
+            
+            return {
+                "success": True,
+                "verification_passed": verification_passed,
+                "match_score": match_score,
+                "total_results": len(results),
+                "matched_results": matched_results[:3],  # 只返回前3个最佳匹配
+                "search_query": search_query
+            }
+        else:
+            logger.error(f"EXA API调用失败: {response.status_code}, {response.text}")
+            return {"success": False, "error": f"EXA API error: {response.status_code}"}
+            
+    except Exception as e:
+        logger.error(f"EXA搜索过程中出现错误: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def check_string_content(input_string: str, target_word: str = None) -> Dict[str, Any]:
     """
@@ -263,6 +420,7 @@ def check_string_content(input_string: str, target_word: str = None) -> Dict[str
             "verification_method": "",
             "extracted_info": {},
             "verification_details": {},
+            "exa_search_results": {},
             "string_length": len(input_string)
         }
         
@@ -290,22 +448,49 @@ def check_string_content(input_string: str, target_word: str = None) -> Dict[str
                 }
                 logger.warning("讲者验证：无法提取医生姓名")
             else:
-                # 如果提取到医生信息，进行信息完整性检查
-                info_fields = [k for k, v in extracted_info.items() if v]
-                if len(info_fields) >= 3:  # 至少有3个字段有值
+                # 如果提取到医生信息，进行EXA网络搜索验证
+                logger.info(f"开始EXA网络搜索验证医生身份: {extracted_info['name']}")
+                
+                exa_results = search_doctor_with_exa(
+                    extracted_info['name'],
+                    extracted_info['hospital'],
+                    extracted_info['department']
+                )
+                
+                result["exa_search_results"] = exa_results
+                
+                if exa_results["success"] and exa_results["verification_passed"]:
+                    # EXA搜索验证通过
                     result["verification_passed"] = True
-                    result["verification_method"] = "info_extraction"
+                    result["verification_method"] = "exa_search"
                     result["verification_details"] = {
-                        "message": f"讲者信息完整，包含{len(info_fields)}个字段",
-                        "confidence_score": min(len(info_fields) * 2, 8)
+                        "message": f"网络搜索验证通过，匹配分数: {exa_results['match_score']}",
+                        "confidence_score": min(exa_results['match_score'], 10),
+                        "search_results_count": exa_results['total_results'],
+                        "matched_results_count": len(exa_results['matched_results'])
                     }
-                    logger.info(f"讲者验证通过：信息完整性检查，{len(info_fields)}个字段")
+                    logger.info(f"EXA搜索验证通过：匹配分数 {exa_results['match_score']}")
                 else:
-                    result["verification_details"] = {
-                        "message": f"讲者信息不完整，仅包含{len(info_fields)}个字段",
-                        "confidence_score": len(info_fields)
-                    }
-                    logger.warning(f"讲者验证失败：信息不完整，仅{len(info_fields)}个字段")
+                    # EXA搜索验证失败，但仍然检查信息完整性作为辅助
+                    info_fields = [k for k, v in extracted_info.items() if v]
+                    if len(info_fields) >= 3:
+                        result["verification_passed"] = False  # 网络搜索失败，身份验证不通过
+                        result["verification_method"] = "exa_search_failed"
+                        result["verification_details"] = {
+                            "message": f"网络搜索验证失败，但讲者信息完整（包含{len(info_fields)}个字段）",
+                            "confidence_score": 2,  # 低置信度
+                            "search_error": exa_results.get("error", "搜索结果不匹配"),
+                            "info_completeness": f"{len(info_fields)}/4个字段"
+                        }
+                        logger.warning(f"EXA搜索验证失败，信息完整性作为辅助：{len(info_fields)}个字段")
+                    else:
+                        result["verification_details"] = {
+                            "message": f"网络搜索验证失败，且讲者信息不完整（仅包含{len(info_fields)}个字段）",
+                            "confidence_score": 0,
+                            "search_error": exa_results.get("error", "搜索结果不匹配"),
+                            "info_completeness": f"{len(info_fields)}/4个字段"
+                        }
+                        logger.warning(f"EXA搜索验证失败，信息也不完整：仅{len(info_fields)}个字段")
         
         execution_time = time.time() - start_time
         log_mcp_tool_call("check_string_content", True, execution_time)
@@ -488,13 +673,14 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
 3. 重新提交预审系统进行检查
 4. 通过预审后提交人工详细审核"""
             
-            elif verification_method == "info_extraction":
-                # 信息提取验证通过的情况
+            elif verification_method == "exa_search":
+                # EXA网络搜索验证通过的情况
+                exa_results = string_result.get("exa_search_results", {})
                 if file_count > min_file_count:
-                    result = f"""预审通过 - 讲者身份信息验证成功
+                    result = f"""预审通过 - 讲者身份验证成功
 
 通过原因：
-✅ 讲者身份信息完整，验证通过
+✅ 网络搜索验证通过，讲者身份真实可靠
 ✅ {folder_type} '{folder_name}' 中支撑文档数量充足（{file_count}个文档，超过最低要求{min_file_count}个）
 
 讲者信息：
@@ -503,13 +689,16 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
 - 科室: {extracted_info.get('department', '未提取')}
 - 职称: {extracted_info.get('title', '未提取')}
 
+网络验证详情：
+- 搜索匹配分数: {exa_results.get('match_score', 0)}/10
+- 搜索结果数量: {exa_results.get('total_results', 0)}个
+- 匹配结果数量: {len(exa_results.get('matched_results', []))}个
+
 当前{folder_type}文档列表：
 {file_list_str}
 
-验证详情：
-{verification_details.get('message', '')}
-
 后续步骤：
+- 身份验证已通过网络搜索确认
 - 建议进行进一步的背景调查
 - 确认讲者的专业领域匹配度
 - 准备相关的演讲协议和材料"""
@@ -517,8 +706,12 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
                     result = f"""预审不通过 - 讲者身份验证通过但支撑文档不足
 
 问题详情：
-✅ 讲者身份信息完整，验证通过
+✅ 网络搜索验证通过，讲者身份真实可靠
 ❌ {folder_type} '{folder_name}' 中支撑文档不足（当前{file_count}个，需要超过{min_file_count}个）
+
+网络验证详情：
+- 搜索匹配分数: {exa_results.get('match_score', 0)}/10
+- 搜索结果数量: {exa_results.get('total_results', 0)}个
 
 当前{folder_type}文档列表：
 {file_list_str}
@@ -531,34 +724,85 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
             reasons = []
             improvements = []
             
-            if not extracted_info.get('name'):
-                reasons.append("无法从文本中提取医生姓名")
+            if verification_method == "exa_search_failed":
+                # EXA搜索失败但信息完整的情况
+                exa_results = string_result.get("exa_search_results", {})
+                reasons.append(f"网络搜索验证失败，无法确认讲者'{extracted_info.get('name', '未知')}'的身份真实性")
                 improvements.extend([
-                    "请在文本中明确提供讲者的具体姓名，例如：",
-                    "  - '本次活动我请到了张三医生'",
-                    "  - '邀请了李四医生担任讲者'",
-                    "  - '王五医生将为我们演讲'"
+                    f"讲者'{extracted_info.get('name', '未知')}'的网络验证失败：",
+                    f"  - 搜索错误: {exa_results.get('error', '未知错误')}",
+                    "  - 建议提供更详细的讲者身份证明文档",
+                    "  - 或联系讲者提供官方身份验证材料",
+                    "  - 可以尝试提供讲者的官方简历或医院官网链接"
                 ])
+                
+                # 检查文档情况
+                if file_count > min_file_count:
+                    result = f"""预审部分通过 - 网络验证失败但文档充足
+
+问题详情：
+❌ 网络搜索验证失败，无法确认讲者身份真实性
+✅ {folder_type} '{folder_name}' 中支撑文档数量充足（{file_count}个文档，超过最低要求{min_file_count}个）
+
+网络验证详情：
+- 搜索错误: {exa_results.get('error', '未知错误')}
+- 搜索结果数量: {exa_results.get('total_results', 0)}个
+
+当前{folder_type}文档列表：
+{file_list_str}
+
+具体改进建议：
+{chr(10).join([f"{i+1}. {imp}" for i, imp in enumerate(improvements)])}
+
+整改步骤：
+1. 优先解决讲者身份验证问题
+2. 提供更多讲者身份证明材料
+3. 重新提交预审系统进行检查
+4. 考虑联系讲者所在医院确认身份
+
+注意事项：
+- 虽然支撑文档充足，但讲者身份验证是必需的
+- 建议在解决身份验证问题后再进行下一步"""
+                else:
+                    reasons.append(f"{folder_type} '{folder_name}' 中支撑文档不足（当前{file_count}个，需要超过{min_file_count}个）")
+                    improvements.extend([
+                        f"请补充以下类型的支撑文档到 '{folder_name}' 文件夹：",
+                        "  - 产品说明书或处方信息",
+                        "  - 相关临床研究数据",
+                        "  - 安全性信息和不良反应资料",
+                        "  - 监管部门批准的产品信息"
+                    ])
             else:
-                reasons.append(f"讲者'{extracted_info.get('name')}'的信息不完整")
-                improvements.extend([
-                    f"讲者'{extracted_info.get('name')}'的信息验证失败：",
-                    "  - 请提供更完整的讲者信息（姓名、医院、科室、职称）",
-                    "  - 确保信息格式规范，例如：'张三医生，目前就职北京协和医院心内科，职称为主任医师'",
-                    "  - 或联系讲者提供官方身份验证材料"
-                ])
+                # 其他验证失败情况
+                if not extracted_info.get('name'):
+                    reasons.append("无法从文本中提取医生姓名")
+                    improvements.extend([
+                        "请在文本中明确提供讲者的具体姓名，例如：",
+                        "  - '本次活动我请到了张三医生'",
+                        "  - '邀请了李四医生担任讲者'",
+                        "  - '王五医生将为我们演讲'"
+                    ])
+                else:
+                    reasons.append(f"讲者'{extracted_info.get('name')}'的信息验证失败")
+                    improvements.extend([
+                        f"讲者'{extracted_info.get('name')}'的验证问题：",
+                        "  - 请提供更完整的讲者信息（姓名、医院、科室、职称）",
+                        "  - 确保信息格式规范和准确",
+                        "  - 或联系讲者提供官方身份验证材料"
+                    ])
+                
+                if file_count <= min_file_count:
+                    reasons.append(f"{folder_type} '{folder_name}' 中支撑文档不足（当前{file_count}个，需要超过{min_file_count}个）")
+                    improvements.extend([
+                        f"请补充以下类型的支撑文档到 '{folder_name}' 文件夹：",
+                        "  - 产品说明书或处方信息",
+                        "  - 相关临床研究数据",
+                        "  - 安全性信息和不良反应资料",
+                        "  - 监管部门批准的产品信息"
+                    ])
             
-            if file_count <= min_file_count:
-                reasons.append(f"{folder_type} '{folder_name}' 中支撑文档不足（当前{file_count}个，需要超过{min_file_count}个）")
-                improvements.extend([
-                    f"请补充以下类型的支撑文档到 '{folder_name}' 文件夹：",
-                    "  - 产品说明书或处方信息",
-                    "  - 相关临床研究数据",
-                    "  - 安全性信息和不良反应资料",
-                    "  - 监管部门批准的产品信息"
-                ])
-            
-            result = f"""预审不通过 - 内容需要改进
+            if verification_method != "exa_search_failed" or file_count <= min_file_count:
+                result = f"""预审不通过 - 内容需要改进
 
 问题详情：
 ❌ {'; '.join(reasons)}
@@ -578,6 +822,7 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
 
 注意事项：
 - 所有讲者都必须经过完整的身份验证流程
+- 网络搜索验证是身份真实性的重要环节
 - 请确保讲者信息的真实性和专业性
 - 如有疑问，请咨询医学事务部门或合规团队"""
         

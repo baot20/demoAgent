@@ -1,53 +1,172 @@
 #!/usr/bin/env python3
 """
 SpeakerValidationPreCheckSystem 演示
-讲者身份验证系统使用示例
+讲者身份验证系统使用示例 - 最新版本
 """
 
 import os
 import sys
-import re
-from strands import Agent, tool
-from strands_tools import current_time
+from speaker_validation_tools import perform_preaudit, check_string_content
 
 def demo_speaker_validation():
     """演示讲者身份验证功能"""
     print("=" * 60)
     print("SpeakerValidationPreCheckSystem - 演示模式")
-    print("讲者身份验证系统")
+    print("讲者身份验证系统 v2.1.0")
     print("=" * 60)
     
     # 模拟医药代表提交的讲者信息示例
     test_cases = [
         {
-            "content": "本次活动我请到了鲍娜医生，目前就职demo医院demo科室，职称为副主任医生。",
-            "scenario": "包含特殊标识的讲者信息（直接通过）",
-            "expected": "应该直接通过验证"
+            "content": "本次活动我请到了鲍娜医生，目前就职长海医院demo科室，职称为副主任医生。",
+            "scenario": "鲍娜医生（内部验证）",
+            "expected": "直接通过身份验证，检查tinabao/文件夹",
+            "folder": "tinabao/"
         },
         {
-            "content": "本次活动我请到了张三医生，目前就职北京协和医院心内科，职称为主任医师。",
-            "scenario": "完整的讲者信息（需要验证）", 
-            "expected": "信息完整，应该通过验证"
+            "content": "本次活动我请到了张三医生，目前就职长海医院心内科，职称为主任医师。",
+            "scenario": "张三医生（专属文件夹验证）", 
+            "expected": "EXA搜索验证 + 检查张三-长海医院-心内科/文件夹",
+            "folder": "张三-长海医院-心内科/"
         },
         {
-            "content": "我们邀请了李四医生，他来自上海交通大学医学院附属瑞金医院心血管内科，职称为副主任医师。",
-            "scenario": "详细的讲者资质信息",
-            "expected": "信息详细，应该通过验证"
+            "content": "我们邀请了宋智钢医生，他来自上海长海医院心血管外科，职称为主任医师。",
+            "scenario": "宋智钢医生（专属文件夹验证）",
+            "expected": "EXA搜索验证 + 检查宋智钢-上海长海医院-心血管外科/文件夹",
+            "folder": "宋智钢-上海长海医院-心血管外科/"
+        },
+        {
+            "content": "钟南山 广州医科大学附属第一医院 呼吸内科 院士",
+            "scenario": "钟南山院士（知名医生）",
+            "expected": "EXA搜索应该成功，检查专属文件夹",
+            "folder": "钟南山-广州医科大学附属第一医院-呼吸内科/"
         },
         {
             "content": "今天有个医生来讲课。",
             "scenario": "信息不完整的讲者描述",
-            "expected": "信息不足，应该验证失败"
+            "expected": "无法提取医生姓名，验证失败",
+            "folder": "无法确定"
         },
         {
-            "content": "王五教授将为我们分享最新的治疗方案，他是某医院的专家。",
-            "scenario": "模糊的讲者信息",
-            "expected": "信息不够具体，可能验证失败"
+            "content": "张丹 上海市长海医院 皮肤科 主任",
+            "scenario": "张丹医生（一般医生）",
+            "expected": "EXA搜索可能失败，但信息完整",
+            "folder": "张丹-上海市长海医院-皮肤科/"
         }
     ]
     
-    # 模拟讲者信息提取工具
-    @tool
+    print("🔍 开始演示讲者身份验证流程...")
+    print()
+    
+    for i, test_case in enumerate(test_cases, 1):
+        print(f"📋 测试案例 {i}: {test_case['scenario']}")
+        print(f"   输入内容: {test_case['content']}")
+        print(f"   预期结果: {test_case['expected']}")
+        print(f"   检查文件夹: {test_case['folder']}")
+        print()
+        
+        try:
+            # 执行身份验证检查
+            print("   🔄 执行身份验证...")
+            verification_result = check_string_content(test_case['content'])
+            
+            print(f"   验证结果: {'✅ 通过' if verification_result['verification_passed'] else '❌ 失败'}")
+            print(f"   验证方法: {verification_result['verification_method']}")
+            
+            if verification_result['extracted_info']:
+                info = verification_result['extracted_info']
+                print(f"   提取信息: 姓名={info.get('name', '无')}, 医院={info.get('hospital', '无')}, 科室={info.get('department', '无')}, 职称={info.get('title', '无')}")
+            
+            # 显示EXA搜索结果
+            if 'exa_search_results' in verification_result and verification_result['exa_search_results']:
+                exa_result = verification_result['exa_search_results']
+                if exa_result.get('success'):
+                    print(f"   🌐 EXA搜索: 成功，匹配分数 {exa_result.get('match_score', 0)}/10")
+                    print(f"   搜索结果: {exa_result.get('total_results', 0)}个结果")
+                else:
+                    print(f"   🌐 EXA搜索: 失败，{exa_result.get('error', '未知错误')}")
+            
+            print()
+            
+            # 执行完整预审流程
+            print("   🔄 执行完整预审流程...")
+            preaudit_result = perform_preaudit(test_case['content'])
+            
+            # 显示预审结果摘要
+            if "预审通过" in preaudit_result:
+                print("   🎉 预审结果: ✅ 通过")
+            elif "预审部分通过" in preaudit_result:
+                print("   ⚠️  预审结果: 🔶 部分通过")
+            else:
+                print("   ❌ 预审结果: ❌ 不通过")
+            
+            # 提取关键信息
+            if "网络搜索验证通过" in preaudit_result:
+                print("   🌐 网络验证: ✅ 通过")
+            elif "网络搜索验证失败" in preaudit_result:
+                print("   🌐 网络验证: ❌ 失败")
+            elif "内部验证流程" in preaudit_result:
+                print("   🔒 内部验证: ✅ 通过")
+            
+            if "支撑文档数量充足" in preaudit_result:
+                print("   📁 文档验证: ✅ 充足")
+            elif "支撑文档不足" in preaudit_result:
+                print("   📁 文档验证: ❌ 不足")
+            
+        except Exception as e:
+            print(f"   ❌ 测试失败: {str(e)}")
+        
+        print("-" * 60)
+        print()
+    
+    print("🎯 演示总结:")
+    print("1. 鲍娜医生: 特殊标识，不触发EXA搜索，直接验证通过")
+    print("2. 知名医生: EXA搜索匹配分数高，网络验证通过")
+    print("3. 一般医生: EXA搜索匹配分数低，网络验证可能失败")
+    print("4. 所有医生: 都需要检查对应的专属文件夹文档数量")
+    print("5. 双重验证: 身份验证 + 文档验证 = 最终结果")
+    print()
+    print("=" * 60)
+
+def demo_configuration():
+    """演示配置信息"""
+    print("📋 系统配置信息:")
+    print("-" * 30)
+    
+    try:
+        from speaker_validation_tools import aws_config, s3_config, preaudit_config, exa_config
+        
+        print(f"AWS 区域: {aws_config['region']}")
+        print(f"S3 存储桶: {s3_config['bucket_name']}")
+        print(f"特殊标识: {preaudit_config['target_word']}")
+        print(f"最低文档数: {preaudit_config['min_file_count']}")
+        print(f"EXA API: {'已配置' if exa_config.get('api_key') else '未配置'}")
+        
+    except Exception as e:
+        print(f"配置读取失败: {str(e)}")
+    
+    print()
+
+def main():
+    """主函数"""
+    print("🚀 启动讲者身份验证系统演示")
+    print()
+    
+    # 显示配置信息
+    demo_configuration()
+    
+    # 演示验证功能
+    demo_speaker_validation()
+    
+    print("✨ 演示完成！")
+    print()
+    print("💡 提示:")
+    print("- 设置 EXA_API_KEY 以启用网络搜索功能")
+    print("- 上传文档到对应的S3文件夹以通过文档验证")
+    print("- 查看 README.md 了解更多使用方法")
+
+if __name__ == "__main__":
+    main()
     def mock_extract_speaker_info(content: str) -> dict:
         """模拟从文本中提取讲者信息"""
         info = {

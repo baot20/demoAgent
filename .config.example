@@ -6,6 +6,10 @@ ACCESS_KEY_ID = AKIA...
 SECRET_ACCESS_KEY = your_secret_access_key_here
 REGION = us-east-1
 
+[EXA]
+# EXA 搜索 API key，用于网络搜索验证医生身份
+EXA_API_KEY = your_exa_api_key_here
+
 [S3]
 # 存储医药代表支撑文档的S3存储桶
 BUCKET_NAME = pharma-documents-bucket
