@@ -12,7 +12,7 @@ def demo_speaker_validation():
     """演示讲者身份验证功能"""
     print("=" * 60)
     print("SpeakerValidationPreCheckSystem - 演示模式")
-    print("讲者身份验证系统 v2.1.0")
+    print("讲者身份验证系统 v1.1")
     print("=" * 60)
     
     # 模拟医药代表提交的讲者信息示例

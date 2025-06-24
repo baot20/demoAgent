@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SpeakerValidationPreCheckSystem 使用示例 v2.1.0
+SpeakerValidationPreCheckSystem 使用示例 v1.1
 讲者身份验证系统 - EXA集成版本
 """
 
@@ -11,7 +11,7 @@ def demo_with_real_system():
     """使用真实系统演示功能"""
     print("=" * 60)
     print("SpeakerValidationPreCheckSystem - 真实系统演示")
-    print("讲者身份验证系统 v2.1.0")
+    print("讲者身份验证系统 v1.1")
     print("=" * 60)
     
     try:
@@ -76,7 +76,7 @@ def demo_with_mock_config():
     """使用模拟配置演示系统功能"""
     print("=" * 60)
     print("SpeakerValidationPreCheckSystem - 模拟演示")
-    print("讲者身份验证系统 v2.1.0")
+    print("讲者身份验证系统 v1.1")
     print("=" * 60)
     
     # 模拟验证逻辑

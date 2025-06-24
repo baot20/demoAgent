@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-测试 SpeakerValidationPreCheckSystem MCP Server - 讲者身份验证系统 v2.1.0
+测试 SpeakerValidationPreCheckSystem MCP Server - 讲者身份验证系统 v1.1
 """
 
 import asyncio
@@ -17,7 +17,7 @@ async def test_tools():
     """测试所有工具函数"""
     print("=" * 60)
     print("SpeakerValidationPreCheckSystem MCP Server 测试")
-    print("讲者身份验证系统 v2.1.0 - EXA集成版本")
+    print("讲者身份验证系统 v1.1 - EXA集成版本")
     print("=" * 60)
     
     # 测试配置获取
