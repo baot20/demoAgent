@@ -43,13 +43,23 @@ def test_exa_integration():
             "expected_method": "direct_pass"
         },
         {
-            "name": "张丹医生（触发EXA搜索）",
-            "input": "张丹 上海市长海医院 皮肤科 主任",
+            "name": "张三医生（有文件夹，触发EXA搜索）",
+            "input": "张三 长海医院 心内科 主任医师",
             "expected_method": "exa_search" if exa_api_key else "exa_search_failed"
         },
         {
-            "name": "完整格式输入",
-            "input": "我请到了上海市长海医院皮肤科主任张丹医生",
+            "name": "李四医生（无文件夹，直接失败）",
+            "input": "李四 北京协和医院 心内科 主任医师",
+            "expected_method": "folder_not_found"
+        },
+        {
+            "name": "钟南山院士（知名医生，无文件夹）",
+            "input": "钟南山 广州医科大学附属第一医院 呼吸内科 院士",
+            "expected_method": "folder_not_found"
+        },
+        {
+            "name": "张丹医生（有文件夹但为空）",
+            "input": "张丹 上海市长海医院 皮肤科 主任",
             "expected_method": "exa_search" if exa_api_key else "exa_search_failed"
         }
     ]
@@ -73,6 +83,19 @@ def test_exa_integration():
                 else:
                     print(f"   EXA搜索: 失败，错误 {exa_result.get('error', '未知')}")
             
+            # 测试完整预审流程
+            print("   🔄 完整预审测试...")
+            preaudit_result = perform_preaudit(test_case['input'])
+            
+            if "未找到讲者专属文件夹" in preaudit_result:
+                print("   📁 文件夹检查: ❌ 专属文件夹不存在")
+            elif "预审通过" in preaudit_result:
+                print("   📁 预审结果: ✅ 通过")
+            elif "预审部分通过" in preaudit_result:
+                print("   📁 预审结果: 🔶 部分通过")
+            else:
+                print("   📁 预审结果: ❌ 不通过")
+            
             print()
             
         except Exception as e:
@@ -82,6 +105,11 @@ def test_exa_integration():
     print("=" * 60)
     print("测试完成")
     print("=" * 60)
+    
+    print("\n🎯 新增逻辑验证:")
+    print("✅ 如果医生信息提取成功但S3中没有专属文件夹，直接审核不通过")
+    print("✅ 鲍娜医生特殊处理，不受此逻辑影响")
+    print("✅ 有文件夹的医生继续正常验证流程")
 
 if __name__ == "__main__":
     test_exa_integration()

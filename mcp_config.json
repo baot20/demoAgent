@@ -6,7 +6,21 @@
       "cwd": "/Users/tinabao/Documents/code/demoAgent",
       "env": {
         "PYTHONPATH": "/Users/tinabao/Documents/code/demoAgent"
-      }
+      },
+      "description": "讲者身份验证系统 - 验证医生、专家、教授等讲者的身份资质和支撑文档。支持EXA网络搜索、Bedrock LLM信息提取、专属文件夹检查。适用于医学会议、培训活动、学术讲座的讲者预审。",
+      "keywords": ["讲者验证", "医生审核", "专家资质", "KOL验证", "身份检查", "预审", "合规", "文档验证"],
+      "triggers": [
+        "验证医生",
+        "检查讲者", 
+        "审核专家",
+        "确认身份",
+        "讲者资质",
+        "医生背景",
+        "专家验证",
+        "KOL审核",
+        "演讲者检查",
+        "预审流程"
+      ]
     }
   }
 }

@@ -28,8 +28,23 @@ class ConfigReader:
     def _load_config(self):
         """加载配置文件"""
         try:
-            if not os.path.exists(self.config_file_path):
-                raise FileNotFoundError(f"配置文件 {self.config_file_path} 不存在")
+            # 尝试多个可能的配置文件路径
+            possible_paths = [
+                self.config_file_path,  # 原始路径
+                os.path.join(os.path.dirname(__file__), self.config_file_path),  # 脚本目录
+                os.path.join(os.getcwd(), self.config_file_path),  # 当前工作目录
+                '/Users/tinabao/Documents/code/demoAgent/.config',  # 绝对路径
+            ]
+            
+            config_found = False
+            for path in possible_paths:
+                if os.path.exists(path):
+                    self.config_file_path = path
+                    config_found = True
+                    break
+            
+            if not config_found:
+                raise FileNotFoundError(f"配置文件在以下路径均未找到: {possible_paths}")
             
             self.config.read(self.config_file_path, encoding='utf-8')
             logger.info(f"配置文件 {self.config_file_path} 加载成功")

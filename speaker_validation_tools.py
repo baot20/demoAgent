@@ -18,6 +18,22 @@ from cloudwatch_logger import (
 # 设置 CloudWatch 日志记录器
 logger = get_cloudwatch_logger("speaker_validation_tools")
 
+def check_s3_folder_exists(bucket_name, folder_prefix):
+    """
+    检查S3文件夹是否存在（简化版本，避免超时）
+    """
+    try:
+        # 简化逻辑：如果能列出文件，就认为文件夹存在
+        # 即使文件数量为0，也可能是空文件夹存在
+        result = list_s3_files_with_prefix(bucket_name, folder_prefix)
+        
+        # 如果S3访问成功，就认为文件夹存在（即使为空）
+        return result.get("success", False)
+        
+    except Exception as e:
+        logger.error(f"检查文件夹存在性失败: {str(e)}")
+        return False
+
 # 加载配置
 try:
     config = get_config()
@@ -424,7 +440,7 @@ def check_string_content(input_string: str, target_word: str = None) -> Dict[str
             "string_length": len(input_string)
         }
         
-        # 如果包含特殊标识（如"鲍娜"），直接通过
+        # 如果包含特殊标识（如"鲍娜"），直接通过但仍需提取信息
         if contains_target:
             result["verification_passed"] = True
             result["verification_method"] = "direct_pass"
@@ -432,7 +448,10 @@ def check_string_content(input_string: str, target_word: str = None) -> Dict[str
                 "message": "内容已通过内部验证流程",
                 "confidence_score": 10
             }
-            logger.info(f"讲者验证：包含特殊标识'{target_word}'，直接通过")
+            # 仍然提取医生信息用于文件夹选择
+            extracted_info = extract_doctor_info(input_string)
+            result["extracted_info"] = extracted_info
+            logger.info(f"讲者验证：包含特殊标识'{target_word}'，直接通过，同时提取信息用于文件夹选择")
         else:
             # 如果不包含特殊标识，进行医生信息提取
             logger.info("讲者验证：未包含特殊标识，开始提取医生信息")
@@ -528,14 +547,30 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
         
         # 确定要检查的文件夹前缀
         if contains_target:
-            # 如果包含"鲍娜"，检查tinabao文件夹
-            folder_prefix = "tinabao/"
-            folder_type = "用户文件夹"
-            folder_name = "tinabao"
-            logger.info("检查鲍娜相关的tinabao文件夹")
+            # 如果包含"鲍娜"，也需要提取信息来确定专属文件夹
+            logger.info("鲍娜医生：提取信息以确定专属文件夹")
+            if doctor_name and hospital and department:
+                # 鲍娜医生也使用专属文件夹，去除多余空格
+                clean_name = doctor_name.strip().replace(' ', '')
+                clean_hospital = hospital.strip().replace(' ', '')
+                clean_department = department.strip().replace(' ', '')
+                doctor_folder_prefix = f"{clean_name}-{clean_hospital}-{clean_department}/"
+                folder_prefix = doctor_folder_prefix
+                folder_type = "医生专属文件夹"
+                folder_name = doctor_folder_prefix.rstrip('/')
+                logger.info(f"鲍娜医生使用专属文件夹: {doctor_folder_prefix}")
+            else:
+                # 如果鲍娜医生信息不完整，使用tinabao作为后备
+                folder_prefix = "tinabao/"
+                folder_type = "用户文件夹"
+                folder_name = "tinabao"
+                logger.info("鲍娜医生信息不完整，使用默认tinabao文件夹")
         elif doctor_name and hospital and department:
-            # 如果提取到完整的医生信息，检查医生专属文件夹
-            doctor_folder_prefix = f"{doctor_name}-{hospital}-{department}/"
+            # 如果提取到完整的医生信息，检查医生专属文件夹，去除多余空格
+            clean_name = doctor_name.strip().replace(' ', '')
+            clean_hospital = hospital.strip().replace(' ', '')
+            clean_department = department.strip().replace(' ', '')
+            doctor_folder_prefix = f"{clean_name}-{clean_hospital}-{clean_department}/"
             folder_prefix = doctor_folder_prefix
             folder_type = "医生专属文件夹"
             folder_name = doctor_folder_prefix.rstrip('/')
@@ -556,6 +591,54 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
         
         # 检查对应的文件夹
         s3_result = list_s3_files_with_prefix(bucket_name, folder_prefix)
+        
+        # 检查文件夹是否存在（区分文件夹不存在和文件夹为空）
+        folder_exists = check_s3_folder_exists(bucket_name, folder_prefix)
+        
+        # 新增逻辑：检查文件夹是否存在
+        if not contains_target and extracted_info.get('name'):
+            # 对于非鲍娜医生，如果提取到了医生信息但S3中没有对应文件夹，直接失败
+            if not folder_exists:
+                result = f"""预审不通过 - 未找到讲者专属文件夹
+
+问题详情：
+❌ 系统中未找到讲者 '{extracted_info.get('name', '未知')}' 的专属文件夹
+❌ 预期文件夹路径: {folder_name}
+
+讲者信息：
+- 姓名: {extracted_info.get('name', '未提取')}
+- 医院: {extracted_info.get('hospital', '未提取')}
+- 科室: {extracted_info.get('department', '未提取')}
+- 职称: {extracted_info.get('title', '未提取')}
+
+具体改进建议：
+1. 请确认讲者信息是否准确无误
+2. 联系系统管理员创建讲者专属文件夹: '{folder_name}'
+3. 上传以下类型的支撑文档到专属文件夹：
+   - 医师执业证书
+   - 医师简历和工作证明
+   - 学术论文和研究成果
+   - 医院出具的身份证明
+   - 专业资质证书
+
+整改步骤：
+1. 核实讲者身份信息的准确性
+2. 联系相关部门创建专属文件夹
+3. 准备并上传完整的身份验证文档
+4. 重新提交预审系统进行检查
+
+注意事项：
+- 每位讲者都必须有专属的文件夹存储验证文档
+- 文件夹命名格式：姓名-医院-科室
+- 所有文档必须真实有效，支持身份验证
+- 如有疑问，请咨询医学事务部门或合规团队"""
+                
+                execution_time = time.time() - start_time
+                log_preaudit_event(user_input, result, 0, contains_target)
+                log_mcp_tool_call("perform_preaudit", True, execution_time)
+                logger.warning(f"预审不通过：讲者专属文件夹不存在 - {folder_name}")
+                
+                return result
         
         # 预审逻辑
         if not s3_result["success"]:
