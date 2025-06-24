@@ -36,7 +36,7 @@ logger = get_cloudwatch_logger("speaker_validation_mcp_server")
 # 创建 MCP Server 实例
 server = Server("speaker-validation-precheck")
 
-logger.info("SpeakerValidationPreCheckSystem MCP Server 初始化")
+logger.info("讲者身份验证系统 MCP Server 初始化")
 
 @server.list_tools()
 async def handle_list_tools() -> List[Tool]:
@@ -46,7 +46,7 @@ async def handle_list_tools() -> List[Tool]:
     return [
         Tool(
             name="list_s3_files",
-            description="检查医药代表提交的支撑文档完整性。验证S3存储桶中的文档数量是否满足监管要求的最低标准。",
+            description="检查医药代表提交的支撑文档完整性和数量。用于验证S3存储桶中的文档是否满足监管要求。适用于：文档检查、文件验证、支撑材料审核、合规文档统计。",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -59,17 +59,17 @@ async def handle_list_tools() -> List[Tool]:
         ),
         Tool(
             name="check_string_content",
-            description="检查医药代表提交内容的合规标识。验证演讲内容、培训材料或推广资料是否包含必要的审核人员标识。",
+            description="验证讲者身份信息的真实性和完整性。使用EXA搜索和Bedrock LLM提取医生信息（姓名、医院、科室、职称），验证讲者身份。适用于：讲者验证、医生身份确认、专家资质审核、演讲者背景调查、KOL验证。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "input_string": {
                         "type": "string",
-                        "description": "医药代表提交的内容文本"
+                        "description": "包含讲者信息的文本，如：'张三医生，北京协和医院心内科主任医师'或'我请到了李四教授担任讲者'"
                     },
                     "target_word": {
                         "type": "string",
-                        "description": "要检查的合规标识。如果为空，则使用配置文件中的默认审核人员标识"
+                        "description": "特殊验证标识。如果为空，则使用配置文件中的默认标识"
                     }
                 },
                 "required": ["input_string"]
@@ -77,17 +77,17 @@ async def handle_list_tools() -> List[Tool]:
         ),
         Tool(
             name="perform_preaudit",
-            description="执行医药代表内容的完整预审流程。这是核心工具，会检查合规性和完整性，并提供详细的改进建议。",
+            description="执行讲者身份验证的完整预审流程。这是主要工具，会进行讲者身份验证、EXA网络搜索、专属文件夹检查和文档验证，提供详细的审核结果和改进建议。适用于：讲者预审、医生验证、专家审核、KOL身份确认、演讲者资质检查、医学会议讲者审批、培训讲师验证。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "user_input": {
                         "type": "string",
-                        "description": "医药代表提交的内容（演讲稿、培训材料、推广资料等）"
+                        "description": "医药代表提交的讲者信息，如：'本次活动邀请了张三医生，来自北京协和医院心内科'、'钟南山院士将担任主讲'、'李四教授是我们的特邀专家'"
                     },
                     "bucket_name": {
                         "type": "string",
-                        "description": "存储相关支撑文档的S3存储桶名称。如果为空，则使用配置文件中的默认存储桶"
+                        "description": "存储讲者验证文档的S3存储桶名称。如果为空，则使用配置文件中的默认存储桶"
                     }
                 },
                 "required": ["user_input"]
@@ -95,7 +95,7 @@ async def handle_list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_current_config",
-            description="获取SpeakerValidationPreCheckSystem的当前审核标准和配置信息。查询系统当前的审核标准、合规要求和配置参数。",
+            description="获取讲者身份验证系统的当前配置和审核标准。查询系统的验证标准、EXA搜索配置、文档要求等参数。适用于：系统配置查询、审核标准确认、验证参数检查。",
             inputSchema={
                 "type": "object",
                 "properties": {}

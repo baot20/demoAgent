@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-测试配置系统和预审功能
+测试配置系统和讲者身份验证功能
 """
 
 import sys
@@ -47,7 +47,7 @@ def test_config():
             print(f"  AWS 区域: {aws_config['region']}")
             print(f"  AWS Access Key: {aws_config['access_key_id'][:8]}...")
             print(f"  S3 存储桶: {s3_config['bucket_name']}")
-            print(f"  目标词汇: {preaudit_config['target_word']}")
+            print(f"  特殊标识: {preaudit_config['target_word']}")
             print(f"  最小文件数: {preaudit_config['min_file_count']}")
             
         except Exception as e:
@@ -60,67 +60,78 @@ def test_config():
         print(f"配置测试失败: {str(e)}")
         return False
 
-def test_preaudit_logic():
-    """测试预审逻辑（不连接 AWS）"""
+def test_speaker_verification_logic():
+    """测试讲者身份验证逻辑（模拟）"""
     print("\n" + "=" * 60)
-    print("预审逻辑测试（模拟）")
+    print("讲者身份验证逻辑测试（模拟）")
     print("=" * 60)
     
     # 模拟测试用例
     test_cases = [
         {
-            "input": "你好鲍娜，今天天气不错",
+            "input": "本次活动我请到了鲍娜医生，目前就职demo医院demo科室，职称为副主任医生。",
             "file_count": 5,
-            "expected": "通过"
+            "expected": "直接通过 - 包含特殊标识"
         },
         {
-            "input": "你好，今天天气不错", 
+            "input": "本次活动我请到了张三医生，目前就职北京协和医院心内科，职称为主任医师。",
             "file_count": 5,
-            "expected": "不通过 - 不包含鲍娜"
+            "expected": "信息完整，验证通过"
         },
         {
-            "input": "你好鲍娜，今天天气不错",
-            "file_count": 2,
-            "expected": "不通过 - 文件数不足"
+            "input": "今天有个医生来讲课。",
+            "file_count": 5,
+            "expected": "信息不完整，验证失败"
         },
         {
-            "input": "你好，今天天气不错",
+            "input": "本次活动我请到了李四医生，目前就职上海医院。",
             "file_count": 2,
-            "expected": "不通过 - 两个条件都不满足"
+            "expected": "信息不完整且文档不足"
         }
     ]
     
     for i, case in enumerate(test_cases, 1):
         print(f"\n测试用例 {i}:")
-        print(f"  输入: {case['input']}")
-        print(f"  文件数: {case['file_count']}")
-        print(f"  预期: {case['expected']}")
+        print(f"  讲者信息: {case['input']}")
+        print(f"  支撑文档数: {case['file_count']}")
+        print(f"  预期结果: {case['expected']}")
         
-        # 模拟预审逻辑
+        # 模拟讲者身份验证逻辑
         contains_baona = "鲍娜" in case['input']
-        file_count_ok = case['file_count'] > 3
         
-        if contains_baona and file_count_ok:
-            result = "✅ 预审通过"
+        if contains_baona:
+            result = "✅ 验证通过 - 包含特殊标识'鲍娜'，直接通过"
         else:
-            reasons = []
-            if not contains_baona:
-                reasons.append("不包含'鲍娜'")
-            if not file_count_ok:
-                reasons.append(f"文件数({case['file_count']})不足")
-            result = f"❌ 预审不通过 - {'; '.join(reasons)}"
+            # 模拟信息提取
+            has_name = any(word in case['input'] for word in ['医生', '教授', '主任'])
+            has_hospital = '医院' in case['input']
+            has_department = any(word in case['input'] for word in ['科', '科室', '部门'])
+            has_title = any(word in case['input'] for word in ['主任医师', '副主任医师', '主治医师'])
+            
+            info_count = sum([has_name, has_hospital, has_department, has_title])
+            file_count_ok = case['file_count'] > 3
+            
+            if info_count >= 3 and file_count_ok:
+                result = f"✅ 验证通过 - 信息完整({info_count}/4)且文档充足({case['file_count']}>3)"
+            else:
+                reasons = []
+                if info_count < 3:
+                    reasons.append(f"信息不完整({info_count}/4)")
+                if not file_count_ok:
+                    reasons.append(f"文档不足({case['file_count']}<=3)")
+                result = f"❌ 验证失败 - {'; '.join(reasons)}"
         
-        print(f"  结果: {result}")
+        print(f"  实际结果: {result}")
 
 def main():
     """主函数"""
-    print("S3 预审系统 - 配置和功能测试")
+    print("讲者身份验证系统 - 配置和功能测试")
     
     # 测试配置
     config_ok = test_config()
     
-    # 测试预审逻辑
-    test_preaudit_logic()
+    # 测试讲者验证逻辑
+    test_speaker_verification_logic()
     
     print("\n" + "=" * 60)
     if config_ok:

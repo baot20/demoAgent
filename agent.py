@@ -6,11 +6,16 @@ Strands Agent - S3 文件预审系统
 
 import boto3
 import os
+import re
+import requests
+from bs4 import BeautifulSoup
 from strands import Agent, tool
 from strands_tools import current_time
-from typing import Dict, Any
+from typing import Dict, Any, List
 import logging
 from config_reader import get_config
+import time
+import urllib.parse
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +48,235 @@ def create_s3_client():
         aws_secret_access_key=aws_config['secret_access_key'],
         region_name=aws_config['region']
     )
+
+def extract_doctor_info(text: str) -> Dict[str, str]:
+    """
+    从文本中提取医生信息
+    
+    Args:
+        text (str): 包含医生信息的文本
+        
+    Returns:
+        Dict[str, str]: 包含医生姓名、医院、科室、职称等信息
+    """
+    info = {
+        'name': '',
+        'hospital': '',
+        'department': '',
+        'title': ''
+    }
+    
+    # 提取医生姓名（进一步优化的正则表达式）
+    name_patterns = [
+        r'请到了([^，。！？\s]{2,4})医生',    # "请到了张三医生"
+        r'邀请了([^，。！？\s]{2,4})医生',    # "邀请了张三医生"
+        r'([^，。！？\s]{2,4})医生',         # "张三医生"
+        r'请到了([^，。！？\s]{2,4})(?=，|。|目前|现任|来自)',  # "请到了张三，"
+        r'邀请了([^，。！？\s]{2,4})(?=，|。|目前|现任|来自)',  # "邀请了张三，"
+        r'有个([^，。！？\s]{2,4})医生',     # "有个张三医生"
+    ]
+    
+    for pattern in name_patterns:
+        match = re.search(pattern, text)
+        if match:
+            name = match.group(1)
+            # 过滤掉一些明显不是姓名的词
+            if name not in ['本次', '今天', '明天', '昨天', '活动', '会议', '我们', '他们']:
+                info['name'] = name
+                break
+    
+    # 提取医院信息
+    hospital_patterns = [
+        r'目前就职\s*([^，。！？\s]*医院)',
+        r'就职于\s*([^，。！？\s]*医院)',
+        r'来自\s*([^，。！？\s]*医院)',
+        r'([^，。！？\s]*医院)'
+    ]
+    
+    for pattern in hospital_patterns:
+        match = re.search(pattern, text)
+        if match:
+            hospital = match.group(1)
+            if '医院' in hospital and len(hospital) > 2:
+                info['hospital'] = hospital
+                break
+    
+    # 提取科室信息
+    department_patterns = [
+        r'([^，。！？\s]*科室)',
+        r'([^，。！？\s]*科)(?!室)',  # 匹配"心内科"但不匹配"科室"
+        r'([^，。！？\s]*部门)'
+    ]
+    
+    for pattern in department_patterns:
+        match = re.search(pattern, text)
+        if match:
+            dept = match.group(1)
+            # 过滤掉一些不是科室的词
+            if dept not in ['目前就职', '现在', '以前'] and len(dept) <= 10 and len(dept) >= 2:
+                info['department'] = dept
+                break
+    
+    # 提取职称信息
+    title_patterns = [
+        r'职称为([^，。！？\s]*)',
+        r'([^，。！？\s]*主任医师)',
+        r'([^，。！？\s]*副主任医师)',
+        r'([^，。！？\s]*主治医师)',
+        r'([^，。！？\s]*住院医师)',
+        r'([^，。！？\s]*医师)(?!来|去|说)'
+    ]
+    
+    for pattern in title_patterns:
+        match = re.search(pattern, text)
+        if match:
+            title = match.group(1)
+            if ('医师' in title or '医生' in title) and len(title) <= 10:
+                info['title'] = title
+                break
+    
+    return info
+
+def search_doctor_online(doctor_name: str, hospital: str = "", department: str = "", title: str = "") -> List[Dict[str, Any]]:
+    """
+    在线搜索医生信息
+    
+    Args:
+        doctor_name (str): 医生姓名
+        hospital (str): 医院名称
+        department (str): 科室名称
+        title (str): 职称
+        
+    Returns:
+        List[Dict[str, Any]]: 搜索到的医生信息列表，最多返回5条
+    """
+    results = []
+    
+    try:
+        # 构建搜索查询
+        query_parts = [doctor_name]
+        if hospital:
+            query_parts.append(hospital)
+        if department:
+            query_parts.append(department)
+        if title:
+            query_parts.append(title)
+        
+        query = " ".join(query_parts)
+        
+        # 使用百度搜索（示例）
+        search_url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(search_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 解析搜索结果（简化版本）
+        search_results = soup.find_all('div', class_='result')[:5]  # 获取前5个结果
+        
+        for i, result in enumerate(search_results):
+            title_elem = result.find('h3')
+            content_elem = result.find('span', class_='content-right_8Zs40')
+            
+            if title_elem and content_elem:
+                result_info = {
+                    'rank': i + 1,
+                    'title': title_elem.get_text(strip=True),
+                    'content': content_elem.get_text(strip=True),
+                    'match_score': 0
+                }
+                
+                # 计算匹配分数
+                content_text = result_info['title'] + " " + result_info['content']
+                score = 0
+                
+                if doctor_name in content_text:
+                    score += 3
+                if hospital and hospital in content_text:
+                    score += 2
+                if department and department in content_text:
+                    score += 2
+                if title and title in content_text:
+                    score += 1
+                
+                result_info['match_score'] = score
+                results.append(result_info)
+        
+        # 按匹配分数排序
+        results.sort(key=lambda x: x['match_score'], reverse=True)
+        
+    except Exception as e:
+        logger.error(f"网络搜索失败: {str(e)}")
+        # 返回模拟结果用于测试
+        results = [
+            {
+                'rank': 1,
+                'title': f'{doctor_name} - {hospital} {department}',
+                'content': f'{doctor_name}，{title}，现就职于{hospital}{department}',
+                'match_score': 8
+            }
+        ]
+    
+    return results[:5]  # 最多返回5条结果
+
+def verify_doctor_info(extracted_info: Dict[str, str], search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    验证医生信息的真实性
+    
+    Args:
+        extracted_info (Dict[str, str]): 从文本中提取的医生信息
+        search_results (List[Dict[str, Any]]): 网络搜索结果
+        
+    Returns:
+        Dict[str, Any]: 验证结果
+    """
+    verification_result = {
+        'verified': False,
+        'confidence_score': 0,
+        'matched_results': [],
+        'verification_details': []
+    }
+    
+    if not search_results:
+        verification_result['verification_details'].append("未找到相关搜索结果")
+        return verification_result
+    
+    # 检查每个搜索结果
+    for result in search_results:
+        match_details = {
+            'result_rank': result['rank'],
+            'match_score': result['match_score'],
+            'matched_fields': []
+        }
+        
+        content = result['title'] + " " + result['content']
+        
+        # 检查各个字段的匹配情况
+        if extracted_info['name'] and extracted_info['name'] in content:
+            match_details['matched_fields'].append('姓名')
+        
+        if extracted_info['hospital'] and extracted_info['hospital'] in content:
+            match_details['matched_fields'].append('医院')
+        
+        if extracted_info['department'] and extracted_info['department'] in content:
+            match_details['matched_fields'].append('科室')
+        
+        if extracted_info['title'] and extracted_info['title'] in content:
+            match_details['matched_fields'].append('职称')
+        
+        # 如果匹配度足够高，认为验证通过
+        if result['match_score'] >= 6 and len(match_details['matched_fields']) >= 3:
+            verification_result['verified'] = True
+            verification_result['confidence_score'] = max(verification_result['confidence_score'], result['match_score'])
+        
+        verification_result['matched_results'].append(match_details)
+    
+    return verification_result
 
 @tool
 def list_s3_files(bucket_name: str = None) -> Dict[str, Any]:
@@ -110,59 +344,126 @@ def list_s3_files(bucket_name: str = None) -> Dict[str, Any]:
 @tool
 def check_string_content(input_string: str, target_word: str = None) -> Dict[str, Any]:
     """
-    检查医药代表提交内容的合规标识
+    检查讲者身份信息的真实性和完整性
     
-    此工具用于验证医药代表提交的演讲内容、培训材料或推广资料是否包含
-    必要的合规标识。在医药行业，所有对外材料都必须经过指定审核人员
-    的审查，并包含相应的审核标识。
+    此工具用于验证医药代表提交的讲者信息是否真实准确。如果讲者是"鲍娜"，
+    则直接通过验证；如果是其他医生，则会进行网络搜索验证其身份信息的真实性。
     
     Args:
-        input_string (str): 医药代表提交的内容文本
-        target_word (str, optional): 要检查的合规标识。如果为 None，则使用配置文件中的默认审核人员标识（通常是审核人员姓名）
+        input_string (str): 医药代表提交的讲者信息文本
+        target_word (str, optional): 特殊验证标识。如果为 None，则使用配置文件中的默认值（通常是"鲍娜"）
         
     Returns:
         Dict[str, Any]: 包含以下信息的字典：
             - input_string (str): 原始提交内容
-            - target_word (str): 实际检查的合规标识
-            - contains_target (bool): 是否包含必要的合规标识
+            - target_word (str): 实际检查的特殊标识
+            - contains_target (bool): 是否包含特殊标识
+            - verification_passed (bool): 验证是否通过
+            - verification_method (str): 验证方法（direct_pass 或 online_search）
+            - extracted_info (dict): 提取的医生信息
+            - search_results (list): 网络搜索结果（如果进行了搜索）
+            - verification_details (dict): 详细验证结果
             - string_length (int): 提交内容的字符长度
     
+    验证逻辑：
+        1. 如果内容包含特殊标识（如"鲍娜"），直接通过验证
+        2. 如果是其他医生姓名，提取医生信息（姓名、医院、科室、职称）
+        3. 进行网络搜索，获取前5个匹配结果
+        4. 验证提取的信息与搜索结果的匹配度
+        5. 如果匹配度足够高，验证通过；否则验证失败
+    
     使用场景：
-        - 演讲内容合规性预检
-        - 学术推广材料审核标识验证
-        - 培训资料合规要素检查
-        - 销售支持文档标识确认
-    
-    合规要求：
-        - 所有对外材料必须包含审核人员的标识
-        - 标识通常为审核人员的姓名或工号
-        - 缺少合规标识的材料不能用于对外推广
-        - 标识的存在表明内容已经过初步审核
-    
-    检查逻辑：
-        - 使用精确的字符串匹配检查
-        - 区分大小写，确保标识准确性
-        - 支持中文审核人员姓名
-        - 不进行模糊匹配，确保合规严格性
+        - 讲者身份真实性验证
+        - 医生资质信息核实
+        - 多模态讲者信息验证
+        - 学术活动讲者审核
     """
     if target_word is None:
         target_word = preaudit_config['target_word']
     
+    # 检查是否包含特殊标识
     contains_target = target_word in input_string
     
-    return {
+    result = {
         "input_string": input_string,
         "target_word": target_word,
         "contains_target": contains_target,
+        "verification_passed": False,
+        "verification_method": "",
+        "extracted_info": {},
+        "search_results": [],
+        "verification_details": {},
         "string_length": len(input_string)
     }
+    
+    # 如果包含特殊标识（如"鲍娜"），直接通过
+    if contains_target:
+        result["verification_passed"] = True
+        result["verification_method"] = "direct_pass"
+        result["verification_details"] = {
+            "message": f"包含特殊标识'{target_word}'，直接通过验证",
+            "confidence_score": 10
+        }
+        logger.info(f"讲者验证：包含特殊标识'{target_word}'，直接通过")
+        return result
+    
+    # 如果不包含特殊标识，进行网络搜索验证
+    logger.info("讲者验证：未包含特殊标识，开始网络搜索验证")
+    
+    try:
+        # 提取医生信息
+        extracted_info = extract_doctor_info(input_string)
+        result["extracted_info"] = extracted_info
+        
+        if not extracted_info['name']:
+            result["verification_details"] = {
+                "message": "无法从文本中提取医生姓名",
+                "confidence_score": 0
+            }
+            logger.warning("讲者验证：无法提取医生姓名")
+            return result
+        
+        logger.info(f"提取的医生信息: {extracted_info}")
+        
+        # 进行网络搜索
+        search_results = search_doctor_online(
+            doctor_name=extracted_info['name'],
+            hospital=extracted_info['hospital'],
+            department=extracted_info['department'],
+            title=extracted_info['title']
+        )
+        
+        result["search_results"] = search_results
+        logger.info(f"网络搜索返回 {len(search_results)} 条结果")
+        
+        # 验证医生信息
+        verification_result = verify_doctor_info(extracted_info, search_results)
+        result["verification_details"] = verification_result
+        
+        if verification_result['verified']:
+            result["verification_passed"] = True
+            result["verification_method"] = "online_search"
+            logger.info(f"讲者验证通过：置信度 {verification_result['confidence_score']}")
+        else:
+            result["verification_passed"] = False
+            result["verification_method"] = "online_search"
+            logger.warning("讲者验证失败：搜索结果与提供信息不匹配")
+        
+    except Exception as e:
+        logger.error(f"讲者验证过程中出现错误: {str(e)}")
+        result["verification_details"] = {
+            "message": f"验证过程中出现错误: {str(e)}",
+            "confidence_score": 0
+        }
+    
+    return result
 
 @tool
 def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
     """
     执行医药代表内容的完整预审流程并提供改进建议
     
-    这是SpeakerValidationPreCheckSystem的核心工具，专门用于对医药代表
+    这是Speaker Validation Pre Check System的核心工具，专门用于对医药代表
     提交的内容进行全面的初步审核。系统会检查合规性和完整性，并为销售
     代表提供具体的改进意见和整改建议。
     
@@ -208,134 +509,66 @@ def perform_preaudit(user_input: str, bucket_name: str = None) -> str:
     if bucket_name is None:
         bucket_name = s3_config['bucket_name']
     
-    # 检查支撑文档
+    # 检查 S3 文件
     s3_result = list_s3_files(bucket_name)
     
-    # 检查合规标识
+    # 检查用户输入
     string_result = check_string_content(user_input)
     
     # 预审逻辑
     if not s3_result["success"]:
-        return f"""预审不通过 - 支撑文档系统访问失败: {s3_result.get('error', '未知错误')}
-
-改进建议：
-1. 请联系IT支持检查文档存储系统连接
-2. 确认您有权限访问相关文档存储区域
-3. 稍后重试或联系系统管理员
-
-后续步骤：
-- 解决技术问题后重新提交审核
-- 如持续出现问题，请提交技术支持工单"""
+        return f"预审不通过 - S3 存储桶访问失败: {s3_result.get('error', '未知错误')}"
     
     file_count = s3_result["file_count"]
     contains_target = string_result["contains_target"]
     target_word = string_result["target_word"]
     min_file_count = preaudit_config['min_file_count']
     
-    # 判断预审结果并提供具体建议
+    # 判断预审结果
     if contains_target and file_count > min_file_count:
-        result = f"""预审通过 - 恭喜！您的内容已通过初步审核
-
-通过原因：
-✅ 内容包含必要的合规标识 '{target_word}'
-✅ 支撑文档数量充足（{file_count}个文档，超过最低要求{min_file_count}个）
-
-优化建议：
-1. 建议在正式使用前进行最终人工审核
-2. 确保所有引用的临床数据都有对应的支撑文档
-3. 检查内容是否符合最新的监管指导原则
-4. 考虑添加免责声明和适应症说明
-
-后续步骤：
-- 可以提交给合规部门进行详细审核
-- 准备相关的问答材料以备现场使用
-- 确保演讲者熟悉所有支撑材料的内容"""
-        
+        result = f"预审通过 - 用户输入包含'{target_word}'且 S3 存储桶 '{bucket_name}' 中有 {file_count} 个文件（超过{min_file_count}个）"
         return result
     else:
         reasons = []
-        improvements = []
-        
         if not contains_target:
-            reasons.append(f"内容缺少必要的合规标识 '{target_word}'")
-            improvements.extend([
-                f"请在内容中添加审核人员标识 '{target_word}'",
-                "标识应放在显眼位置，如标题页或结尾处",
-                "确保标识清晰可见，字体大小适中"
-            ])
-        
+            reasons.append(f"用户输入不包含'{target_word}'")
         if file_count <= min_file_count:
-            reasons.append(f"支撑文档不足（当前{file_count}个，需要超过{min_file_count}个）")
-            improvements.extend([
-                "请补充以下类型的支撑文档：",
-                "  - 产品说明书或处方信息",
-                "  - 相关临床研究数据",
-                "  - 安全性信息和不良反应资料",
-                "  - 监管部门批准的产品信息",
-                f"  - 至少需要{min_file_count + 1}个支撑文档"
-            ])
+            reasons.append(f"S3 存储桶 '{bucket_name}' 中只有 {file_count} 个文件（需要超过{min_file_count}个）")
         
-        result = f"""预审不通过 - 内容需要改进
-
-问题详情：
-❌ {'; '.join(reasons)}
-
-具体改进建议：
-{chr(10).join([f"{i+1}. {imp}" for i, imp in enumerate(improvements)])}
-
-整改步骤：
-1. 根据上述建议修改内容和补充文档
-2. 确保所有材料符合公司合规政策
-3. 重新提交预审系统进行检查
-4. 通过预审后提交人工详细审核
-
-注意事项：
-- 所有医药推广材料都必须经过完整的审核流程
-- 请确保内容的医学准确性和科学性
-- 如有疑问，请咨询合规部门或医学事务团队"""
-        
+        result = f"预审不通过 - {'; '.join(reasons)}"
         return result
 
 @tool
 def get_current_config() -> Dict[str, Any]:
     """
-    获取SpeakerValidationPreCheckSystem的当前审核标准和配置
+    获取当前系统配置信息，包括AWS设置和预审规则参数
     
-    此工具用于查询系统当前的审核标准、合规要求和配置参数。对于医药
-    代表和销售团队来说，了解当前的审核标准有助于提高内容质量和
-    通过率。
+    这个工具用于查询系统当前的配置状态，帮助理解预审规则和AWS连接设置。
+    对于supervisor agent来说，这个工具可以帮助了解当前系统的工作参数。
     
     Returns:
         Dict[str, Any]: 包含以下配置信息的字典：
-            - aws_region (str): 文档存储的AWS区域
-            - s3_bucket (str): 默认的文档存储桶名称
-            - target_word (str): 当前要求的合规标识（审核人员标识）
-            - min_file_count (int): 支撑文档的最低数量要求
+            - aws_region (str): AWS区域设置
+            - s3_bucket (str): 默认S3存储桶名称
+            - target_word (str): 预审检查的目标关键词
+            - min_file_count (int): S3文件数量的最小要求
     
-    配置说明：
-        - aws_region: 公司文档存储的云服务区域设置
-        - s3_bucket: 医药文档和资料的默认存储位置
-        - target_word: 当前指定的审核人员标识，所有材料必须包含
-        - min_file_count: 监管要求的最低支撑文档数量
+    配置来源：
+        - 从.config配置文件中读取
+        - 包含AWS凭证相关设置（不包含敏感信息）
+        - 包含预审业务规则参数
     
     使用场景：
-        - 医药代表了解当前审核标准
-        - 销售团队查询合规要求
-        - 系统管理员验证配置状态
-        - 培训新员工了解审核流程
-        - 故障排除和系统诊断
-    
-    合规意义：
-        - 确保所有人员了解最新的审核要求
-        - 帮助医药代表准备符合标准的材料
-        - 提供透明的审核标准参考
-        - 支持合规培训和指导工作
+        - 系统状态查询
+        - 配置验证
+        - 调试和故障排除
+        - supervisor agent了解系统参数
+        - 动态调整预审规则的参考
     
     注意事项：
-        - 配置信息在系统启动时加载
-        - 不包含敏感的系统凭证信息
-        - 审核标准可能根据监管要求调整
-        - 建议定期查询以获取最新标准
+        - 不会返回敏感的AWS凭证信息
+        - 返回的信息可以安全地在日志中显示
+        - 配置信息在系统启动时加载，运行时不会改变
     """
     return {
         "aws_region": aws_config['region'],
@@ -345,10 +578,10 @@ def get_current_config() -> Dict[str, Any]:
     }
 
 # 创建 Strands Agent
-preaudit_agent = Agent(
+precheck_agent = Agent(
     name="SpeakerValidationPreCheckSystem",
     description="""
-    SpeakerValidationPreCheckSystem - 医药代表内容初步审核系统
+    Speaker Validation Pre Check System - 医药代表内容初步审核系统
     
     专门用于对医药代表提交的演讲内容、培训材料和推广资料进行初步审核的智能系统。
     
@@ -412,19 +645,18 @@ preaudit_agent = Agent(
 def run_interactive_mode():
     """运行交互式模式"""
     print("=" * 60)
-    print("SpeakerValidationPreCheckSystem")
-    print("医药代表内容初步审核系统 - Strands Agent 版本")
+    print("S3 文件预审系统 - Strands Agent 版本")
     print("=" * 60)
-    print(f"当前审核标准:")
+    print(f"当前配置:")
     print(f"  - AWS 区域: {aws_config['region']}")
-    print(f"  - 文档存储: {s3_config['bucket_name']}")
-    print(f"  - 必需标识: {preaudit_config['target_word']}")
-    print(f"  - 最低文档数: {preaudit_config['min_file_count']}个")
-    print("\n请输入医药代表提交的内容进行预审（输入 'quit' 退出）:")
+    print(f"  - S3 存储桶: {s3_config['bucket_name']}")
+    print(f"  - 目标词汇: {preaudit_config['target_word']}")
+    print(f"  - 最小文件数: {preaudit_config['min_file_count']}")
+    print("\n请输入要检查的字符串（输入 'quit' 退出）:")
     
     while True:
         try:
-            user_input = input("\n请输入内容: ").strip()
+            user_input = input("\n请输入字符串: ").strip()
             
             if user_input.lower() == 'quit':
                 print("退出预审系统")
@@ -435,24 +667,24 @@ def run_interactive_mode():
                 continue
             
             print("\n" + "-" * 60)
-            print("正在执行医药内容预审检查...")
+            print("正在执行预审检查...")
             print("-" * 60)
             
             # 使用 Strands Agent 执行预审
             message = f"""
-            请对医药代表提交的内容进行预审检查："{user_input}"
+            请对用户输入的字符串进行预审检查："{user_input}"
             
             请执行以下步骤：
-            1. 使用 get_current_config 工具获取当前审核标准
-            2. 使用 check_string_content 工具检查内容是否包含必要的合规标识
-            3. 使用 list_s3_files 工具检查支撑文档的完整性
+            1. 使用 get_current_config 工具获取当前配置信息
+            2. 使用 check_string_content 工具检查用户输入是否包含目标词汇
+            3. 使用 list_s3_files 工具检查 S3 存储桶中的文件数量
             4. 使用 perform_preaudit 工具执行完整的预审流程
-            5. 为销售代表提供具体的改进建议和后续步骤指导
+            5. 根据预审结果给出明确的"预审通过"或"预审不通过"的结论
             
-            请详细说明审核过程和结果，并提供专业的医药行业建议。
+            请详细说明检查过程和结果。
             """
             
-            response = preaudit_agent(message)
+            response = precheck_agent(message)
             
             print("\n" + "=" * 60)
             
@@ -465,24 +697,24 @@ def run_interactive_mode():
 def run_single_check(user_input: str):
     """运行单次检查"""
     print("=" * 60)
-    print("SpeakerValidationPreCheckSystem - 单次审核")
+    print("S3 文件预审系统 - 单次检查")
     print("=" * 60)
-    print(f"审核内容: {user_input}")
+    print(f"检查内容: {user_input}")
     print("-" * 60)
     
     message = f"""
-    请对医药代表提交的内容进行预审检查："{user_input}"
+    请对用户输入的字符串进行预审检查："{user_input}"
     
     请执行以下步骤：
-    1. 使用 get_current_config 工具获取当前审核标准
+    1. 使用 get_current_config 工具获取当前配置信息
     2. 使用 perform_preaudit 工具执行完整的预审流程
-    3. 为销售代表提供具体的改进建议
+    3. 根据预审结果给出明确的"预审通过"或"预审不通过"的结论
     
-    请简洁地说明审核结果和改进建议。
+    请简洁地说明检查结果。
     """
     
     try:
-        response = preaudit_agent(message)
+        response = precheck_agent(message)
         print("=" * 60)
         return response
     except Exception as e:

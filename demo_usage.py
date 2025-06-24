@@ -1,53 +1,205 @@
 #!/usr/bin/env python3
 """
-Strands Agent 预审系统使用示例
+SpeakerValidationPreCheckSystem 使用示例 v2.1.0
+讲者身份验证系统 - EXA集成版本
 """
 
 import os
 import sys
 
+def demo_with_real_system():
+    """使用真实系统演示功能"""
+    print("=" * 60)
+    print("SpeakerValidationPreCheckSystem - 真实系统演示")
+    print("讲者身份验证系统 v2.1.0")
+    print("=" * 60)
+    
+    try:
+        from speaker_validation_tools import perform_preaudit, check_string_content
+        
+        # 测试用例
+        test_cases = [
+            {
+                "name": "鲍娜医生（内部验证）",
+                "input": "我请到了鲍娜医生，目前就职长海医院demo科室",
+                "description": "特殊标识，不触发EXA搜索，检查tinabao/文件夹"
+            },
+            {
+                "name": "张三医生（专属文件夹）",
+                "input": "我请到了张三医生，目前就职长海医院心内科，职称为主任医师",
+                "description": "EXA搜索验证，检查张三-长海医院-心内科/文件夹"
+            },
+            {
+                "name": "钟南山院士（知名医生）",
+                "input": "钟南山 广州医科大学附属第一医院 呼吸内科 院士",
+                "description": "EXA搜索应该成功，检查专属文件夹"
+            },
+            {
+                "name": "无具体姓名",
+                "input": "我请到了医生，目前就职长海医院",
+                "description": "无法提取医生姓名，验证失败"
+            }
+        ]
+        
+        for i, case in enumerate(test_cases, 1):
+            print(f"\n{i}. 测试: {case['name']}")
+            print(f"   描述: {case['description']}")
+            print(f"   输入: {case['input']}")
+            
+            try:
+                # 执行身份验证
+                result = check_string_content(case['input'])
+                print(f"   身份验证: {'✅ 通过' if result['verification_passed'] else '❌ 失败'}")
+                print(f"   验证方法: {result['verification_method']}")
+                
+                if result['extracted_info']:
+                    info = result['extracted_info']
+                    print(f"   提取信息: {info}")
+                
+                # 执行完整预审
+                preaudit_result = perform_preaudit(case['input'])
+                if "预审通过" in preaudit_result:
+                    print("   预审结果: ✅ 通过")
+                else:
+                    print("   预审结果: ❌ 不通过")
+                
+            except Exception as e:
+                print(f"   ❌ 错误: {str(e)}")
+            
+            print("-" * 40)
+        
+    except ImportError as e:
+        print(f"❌ 导入失败: {e}")
+        print("请确保已正确安装依赖和配置系统")
+
 def demo_with_mock_config():
     """使用模拟配置演示系统功能"""
     print("=" * 60)
-    print("Strands Agent 预审系统 - 演示模式")
+    print("SpeakerValidationPreCheckSystem - 模拟演示")
+    print("讲者身份验证系统 v2.1.0")
     print("=" * 60)
     
-    # 模拟配置（不连接真实 AWS）
-    from strands import Agent, tool
-    from strands_tools import current_time
-    
-    @tool
-    def mock_list_s3_files(bucket_name: str = "demo-bucket") -> dict:
-        """模拟 S3 文件列表"""
-        # 模拟不同的文件数量
-        import random
-        file_count = random.randint(1, 8)
-        files = [f"file_{i}.txt" for i in range(1, file_count + 1)]
+    # 模拟验证逻辑
+    def mock_extract_doctor_info(text: str) -> dict:
+        """模拟医生信息提取"""
+        info = {'name': '', 'hospital': '', 'department': '', 'title': ''}
         
-        return {
-            "success": True,
-            "file_count": file_count,
-            "files": files,
-            "bucket_name": bucket_name
-        }
-    
-    @tool
-    def mock_check_string_content(input_string: str, target_word: str = "鲍娜") -> dict:
-        """模拟字符串内容检查"""
-        contains_target = target_word in input_string
+        # 简单的关键词匹配
+        if '鲍娜' in text:
+            info['name'] = '鲍娜'
+        elif '张三' in text:
+            info['name'] = '张三'
+        elif '钟南山' in text:
+            info['name'] = '钟南山'
         
-        return {
-            "input_string": input_string,
-            "target_word": target_word,
-            "contains_target": contains_target,
-            "string_length": len(input_string)
-        }
+        if '医院' in text:
+            if '长海医院' in text:
+                info['hospital'] = '长海医院'
+            elif '广州医科大学' in text:
+                info['hospital'] = '广州医科大学附属第一医院'
+        
+        if '科' in text:
+            if '心内科' in text:
+                info['department'] = '心内科'
+            elif '呼吸内科' in text:
+                info['department'] = '呼吸内科'
+        
+        return info
     
-    @tool
-    def mock_perform_preaudit(user_input: str, bucket_name: str = "demo-bucket") -> str:
-        """模拟完整预审流程"""
-        # 获取模拟数据
-        s3_result = mock_list_s3_files(bucket_name)
+    def mock_exa_search(doctor_name: str) -> dict:
+        """模拟EXA搜索"""
+        # 知名医生返回高分，其他返回低分
+        if doctor_name in ['钟南山', '张文宏', '李兰娟']:
+            return {"success": True, "match_score": 8, "verification_passed": True}
+        else:
+            return {"success": True, "match_score": 3, "verification_passed": False}
+    
+    def mock_check_s3_folder(folder_name: str) -> dict:
+        """模拟S3文件夹检查"""
+        # 模拟不同文件夹的文档数量
+        folder_docs = {
+            "tinabao/": 4,
+            "张三-长海医院-心内科/": 5,
+            "钟南山-广州医科大学附属第一医院-呼吸内科/": 0,
+            "default": 0
+        }
+        
+        doc_count = folder_docs.get(folder_name, folder_docs["default"])
+        return {"success": True, "file_count": doc_count}
+    
+    # 测试用例
+    test_cases = [
+        "我请到了鲍娜医生，目前就职长海医院demo科室",
+        "我请到了张三医生，目前就职长海医院心内科，职称为主任医师",
+        "钟南山 广州医科大学附属第一医院 呼吸内科 院士",
+        "我请到了医生，目前就职长海医院"
+    ]
+    
+    for i, test_input in enumerate(test_cases, 1):
+        print(f"\n{i}. 测试输入: {test_input}")
+        
+        # 提取医生信息
+        doctor_info = mock_extract_doctor_info(test_input)
+        print(f"   提取信息: {doctor_info}")
+        
+        # 判断验证方法
+        if '鲍娜' in test_input:
+            print("   验证方法: direct_pass (内部验证)")
+            folder_name = "tinabao/"
+            identity_verified = True
+        elif doctor_info['name']:
+            print(f"   验证方法: exa_search (网络搜索)")
+            exa_result = mock_exa_search(doctor_info['name'])
+            print(f"   EXA搜索: 匹配分数 {exa_result['match_score']}/10")
+            identity_verified = exa_result['verification_passed']
+            folder_name = f"{doctor_info['name']}-{doctor_info['hospital']}-{doctor_info['department']}/"
+        else:
+            print("   验证方法: 无法提取医生姓名")
+            identity_verified = False
+            folder_name = "unknown/"
+        
+        # 检查文档
+        if identity_verified or doctor_info['name']:
+            s3_result = mock_check_s3_folder(folder_name)
+            print(f"   检查文件夹: {folder_name}")
+            print(f"   文档数量: {s3_result['file_count']}")
+            
+            # 最终判断
+            if identity_verified and s3_result['file_count'] > 3:
+                print("   最终结果: ✅ 预审通过")
+            elif identity_verified and s3_result['file_count'] <= 3:
+                print("   最终结果: ❌ 身份验证通过但文档不足")
+            elif not identity_verified and s3_result['file_count'] > 3:
+                print("   最终结果: ⚠️ 身份验证失败但文档充足")
+            else:
+                print("   最终结果: ❌ 身份验证失败且文档不足")
+        else:
+            print("   最终结果: ❌ 无法验证身份")
+        
+        print("-" * 50)
+
+def main():
+    """主函数"""
+    print("🚀 SpeakerValidationPreCheckSystem 使用示例")
+    print()
+    
+    # 检查是否有真实配置
+    if os.path.exists('.config'):
+        print("📋 发现配置文件，使用真实系统演示...")
+        demo_with_real_system()
+    else:
+        print("📋 未发现配置文件，使用模拟演示...")
+        demo_with_mock_config()
+    
+    print("\n✨ 演示完成！")
+    print("\n💡 使用提示:")
+    print("1. 复制 .config.example 为 .config 并填入真实配置")
+    print("2. 设置 EXA_API_KEY 以启用网络搜索功能")
+    print("3. 上传测试文档到 S3 对应文件夹")
+    print("4. 运行 python test_exa_integration.py 进行完整测试")
+
+if __name__ == "__main__":
+    main()
         string_result = mock_check_string_content(user_input)
         
         file_count = s3_result["file_count"]

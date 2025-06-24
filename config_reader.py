@@ -28,8 +28,23 @@ class ConfigReader:
     def _load_config(self):
         """加载配置文件"""
         try:
-            if not os.path.exists(self.config_file_path):
-                raise FileNotFoundError(f"配置文件 {self.config_file_path} 不存在")
+            # 尝试多个可能的配置文件路径
+            possible_paths = [
+                self.config_file_path,  # 原始路径
+                os.path.join(os.path.dirname(__file__), self.config_file_path),  # 脚本目录
+                os.path.join(os.getcwd(), self.config_file_path),  # 当前工作目录
+                '/Users/tinabao/Documents/code/demoAgent/.config',  # 绝对路径
+            ]
+            
+            config_found = False
+            for path in possible_paths:
+                if os.path.exists(path):
+                    self.config_file_path = path
+                    config_found = True
+                    break
+            
+            if not config_found:
+                raise FileNotFoundError(f"配置文件在以下路径均未找到: {possible_paths}")
             
             self.config.read(self.config_file_path, encoding='utf-8')
             logger.info(f"配置文件 {self.config_file_path} 加载成功")
@@ -107,6 +122,30 @@ class ConfigReader:
                 'log_stream_name': 'speaker-validation-logs'
             }
     
+    def get_exa_config(self) -> Dict[str, str]:
+        """
+        获取 EXA 配置信息
+        
+        Returns:
+            包含 EXA API key 的字典
+        """
+        try:
+            exa_config = {
+                'api_key': self.config.get('EXA', 'EXA_API_KEY')
+            }
+            
+            if not exa_config['api_key'] or exa_config['api_key'].startswith('your_'):
+                logger.warning("EXA API key 未正确设置")
+            
+            return exa_config
+            
+        except (configparser.NoSectionError, configparser.NoOptionError) as e:
+            logger.warning(f"EXA 配置读取失败: {str(e)}，将使用环境变量")
+            # 如果配置文件中没有EXA配置，尝试从环境变量读取
+            import os
+            api_key = os.getenv('EXA_API_KEY', '')
+            return {'api_key': api_key}
+
     def get_preaudit_config(self) -> Dict[str, Any]:
         """
         获取预审配置信息
@@ -137,7 +176,8 @@ class ConfigReader:
             'aws': self.get_aws_config(),
             's3': self.get_s3_config(),
             'preaudit': self.get_preaudit_config(),
-            'cloudwatch': self.get_cloudwatch_config()
+            'cloudwatch': self.get_cloudwatch_config(),
+            'exa': self.get_exa_config()
         }
     
     def validate_config(self) -> bool:
