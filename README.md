@@ -163,25 +163,6 @@ python start_mcp_server.py
 python mcp_server.py
 ```
 
-#### 集成到Chatbot UI
-
-**如果使用虚拟环境（推荐）**，将以下配置添加到你的chatbot UI的MCP配置中：
-
-```json
-{
-  "mcpServers": {
-    "speaker-validation-precheck": {
-      "command": "python",
-      "args": ["/Users/tinabao/Documents/code/demoAgent/mcp_launcher.py"],
-      "cwd": "/Users/tinabao/Documents/code/demoAgent",
-      "env": {
-        "PYTHONPATH": "/Users/tinabao/Documents/code/demoAgent"
-      }
-    }
-  }
-}
-```
-
 **如果使用系统Python**，使用以下配置：
 
 ```json
@@ -212,17 +193,6 @@ python test_cloudwatch_logs.py
 python mcp_server.py
 ```
 
-2. **配置Chatbot UI**
-
-**方法一：使用配置文件**
-将`mcp_config.json`的内容添加到你的chatbot UI配置中。
-
-**方法二：直接配置**
-在你的chatbot UI设置中添加MCP server：
-- **Server Name**: `speaker-validation-precheck`
-- **Command**: `python`
-- **Args**: `["/Users/tinabao/Documents/code/demoAgent/mcp_server.py"]`
-- **Working Directory**: `/Users/tinabao/Documents/code/demoAgent`
 
 ### 方式三：在代码中使用
 ```python
