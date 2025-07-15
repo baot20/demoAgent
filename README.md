@@ -152,7 +152,7 @@ LOG_STREAM_NAME = speaker-validation-logs
 python agent.py
 ```
 
-### 方式二：MCP Server模式（推荐用于Chatbot UI集成）
+### 方式二：MCP Server模式
 
 #### 启动MCP Server
 ```bash
